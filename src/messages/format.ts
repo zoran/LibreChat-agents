@@ -396,6 +396,8 @@ interface FormatAssistantMessageOptions {
   intentToolNames?: ReadonlySet<string>;
   preserveUnpairedServerToolUses?: boolean;
   preserveReasoningContent?: boolean;
+  /** Explicit complete assistant-history replay; absent/false preserves legacy behavior. */
+  preserveAssistantHistory?: boolean;
   provider?: ProviderName;
   retainedSourceContentEnd?: number;
   sourceMessageId?: string;
@@ -418,6 +420,8 @@ export interface FormatAgentMessagesOptions {
    *  tool-call messages. Explicit opt-in for OpenAI-compatible endpoints that
    *  replay reasoning across turns; defaults to on for DeepSeek thinking-mode. */
   preserveReasoningContent?: boolean;
+  /** Explicit complete assistant-history replay; absent/false preserves legacy behavior. */
+  preserveAssistantHistory?: boolean;
   /** Skill names already primed fresh this turn (manual/always-apply). Their
    *  historical `skill` tool_calls are not reconstructed into a HumanMessage,
    *  so the same SKILL.md body is not injected twice in one request. */
@@ -1613,7 +1617,8 @@ function formatAssistantMessage(
     }
   >();
   const shouldPreserveReasoningContent =
-    options?.preserveReasoningContent === true;
+    options?.preserveReasoningContent === true ||
+    options?.preserveAssistantHistory === true;
   const compactionSemanticIndex = options?.compactionSemanticIndex;
   const semanticSourceMessageId =
     compactionSemanticIndex != null &&
@@ -1687,6 +1692,22 @@ function formatAssistantMessage(
       combinedProvenance
     );
     return created.message;
+  };
+
+  /** Flush exactly one persisted assistant segment without changing its text bytes. */
+  const flushCompleteAssistantContent = (): RoleBearingMessage<AIMessage> | null => {
+    if (currentContent.length === 0 && pendingReasoningContent === '') {
+      return null;
+    }
+    const content: MessageContent = currentContent.every(
+      (part) => part.type === ContentTypes.TEXT
+    )
+      ? currentContent.map((part) => getTextContent(part)).join('')
+      : toLangChainContent(currentContent);
+    const message = appendAIMessage(content, currentContentProvenance);
+    currentContent = [];
+    currentContentProvenance = createProviderMessageProvenanceBuilder();
+    return message;
   };
 
   const attachPendingReasoningContent = (aiMessage: AIMessage): void => {
@@ -1813,6 +1834,12 @@ function formatAssistantMessage(
         }
       }
       if (part.type === ContentTypes.TEXT && part.tool_call_ids) {
+        if (options?.preserveAssistantHistory === true) {
+          currentContent.push(part);
+          appendCurrentContentProvenance(sourcePartIndices, 'model', true);
+          lastAIMessage = flushCompleteAssistantContent();
+          continue;
+        }
         /*
         If there's pending content, it needs to be aggregated as a single string to prepare for tool calls.
         For Anthropic models, the "tool_calls" field on a message is only respected if content is a string.
@@ -1924,6 +1951,13 @@ function formatAssistantMessage(
           continue;
         }
 
+        if (
+          options?.preserveAssistantHistory === true &&
+          (currentContent.length > 0 || pendingReasoningContent !== '')
+        ) {
+          // A fresh segment starts a new tool cycle; consecutive calls share its anchor.
+          lastAIMessage = flushCompleteAssistantContent();
+        }
         if (!lastAIMessage) {
           // "Heal" the payload by creating an AIMessage to precede the tool call
           lastAIMessage = appendAIMessage(
@@ -2034,6 +2068,9 @@ function formatAssistantMessage(
         ToolMessage after the HumanMessage while the call itself sat before
         it, an invalid provider ordering.
         */
+        if (options?.preserveAssistantHistory === true) {
+          flushCompleteAssistantContent();
+        }
         if (currentContent.length > 0) {
           if (
             currentContent.some((content) => content.type !== ContentTypes.TEXT)
@@ -2095,7 +2132,11 @@ function formatAssistantMessage(
       ) {
         continue;
       } else {
-        if (part.type === ContentTypes.TEXT && !getTextContent(part).trim()) {
+        if (
+          options?.preserveAssistantHistory !== true &&
+          part.type === ContentTypes.TEXT &&
+          !getTextContent(part).trim()
+        ) {
           continue;
         }
         currentContent.push(part);
@@ -2112,6 +2153,10 @@ function formatAssistantMessage(
     }
   }
 
+  if (options?.preserveAssistantHistory === true) {
+    flushCompleteAssistantContent();
+    return finalizeFormattedMessages();
+  }
   if (hasReasoning && currentContent.length > 0) {
     let content = '';
     for (const part of currentContent) {
@@ -3117,6 +3162,7 @@ export const formatAgentMessages = (
       compactionSemanticIndex: compactionSemanticIndexCollector,
       intentToolNames: options?.compactionSemanticIndex?.intentToolNames,
       preserveUnpairedServerToolUses: i === payload.length - 1,
+      preserveAssistantHistory: options?.preserveAssistantHistory,
       preserveReasoningContent:
         options?.preserveReasoningContent ??
         options?.provider === Providers.DEEPSEEK,

@@ -190,12 +190,37 @@ See [the design decision](docs/adr/0010-project-accepted-model-results.md).
 
 ## Development
 
+Use Node.js 24 or newer and npm 10.5.2, as declared in `package.json`. A source
+checkout builds using its own dependencies:
+
 ```bash
 npm ci
 npm run build
 npm test
 npx tsc --noEmit
 npx eslint src/
+```
+
+The `prepare` lifecycle runs the normal CJS, ESM, and declaration build during
+installation, including installation from an immutable Git commit. Keep npm
+lifecycle scripts enabled. Set `CI=true` to skip optional Git hook setup; the
+build still runs. After source edits, use `npm run build` to refresh `dist/`.
+
+This fork's `4.0.1+assistant-history.1` version adds explicit
+`preserveAssistantHistory: true` support to `formatAgentMessages` and the
+OpenAI-compatible `ChatOpenAI` adapter. Set it at both boundaries to retain
+persisted reasoning, visible text, and permitted tool-call/result order. Absent
+or `false` preserves the existing behavior. The option is local configuration
+and is not sent as a provider request parameter.
+
+Consume this source variant through an immutable Git commit recorded in the
+consumer's dependency manifest and lockfile. The registry installation command
+above selects the published package, not an unpublished fork revision.
+
+Run the focused formatter and client regressions with:
+
+```bash
+npm test -- --runInBand --runTestsByPath src/messages/complete-assistant-history.spec.ts src/llm/openai/complete-assistant-history.spec.ts
 ```
 
 ## Documentation

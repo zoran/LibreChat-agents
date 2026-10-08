@@ -336,6 +336,8 @@ const completionsApiContentBlockConverter: StandardContentBlockConverter<{
 export interface ConvertMessagesOptions {
   /** Include reasoning_content field for DeepSeek thinking mode with tool calls */
   includeReasoningContent?: boolean;
+  /** Retain complete assistant content/reasoning independently of tool context. */
+  preserveAssistantHistory?: boolean;
   /** Include reasoning_details field for OpenRouter/Gemini thinking mode with tool calls */
   includeReasoningDetails?: boolean;
   /** Convert reasoning_details to content blocks for Claude (requires content array format) */
@@ -417,7 +419,10 @@ export function _convertMessagesToOpenAIParams(
       completionParam.tool_calls = message.tool_calls.map(
         convertLangChainToolCallToBoundedOpenAI
       );
-      completionParam.content = hasReasoningBlock ? content : '';
+      completionParam.content =
+        options?.preserveAssistantHistory === true || hasReasoningBlock
+          ? content
+          : '';
       if (
         options?.includeReasoningDetails === true &&
         message.additional_kwargs.reasoning_details != null
@@ -522,9 +527,12 @@ export function _convertMessagesToOpenAIParams(
     }
 
     if (
-      options?.includeReasoningContent === true &&
+      (options?.includeReasoningContent === true ||
+        options?.preserveAssistantHistory === true) &&
       isAIMessage(message) &&
-      (hasReasoningToolCallContext || messageHasToolCalls) &&
+      (options.preserveAssistantHistory === true ||
+        hasReasoningToolCallContext ||
+        messageHasToolCalls) &&
       typeof message.additional_kwargs.reasoning_content === 'string' &&
       message.additional_kwargs.reasoning_content !== ''
     ) {

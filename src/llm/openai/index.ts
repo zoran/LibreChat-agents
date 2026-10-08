@@ -124,6 +124,8 @@ type LibreChatOpenAIFields = t.ChatOpenAIFields & {
   _lc_stream_delay?: number;
   firstPartyEndpoint?: boolean;
   includeReasoningContent?: boolean;
+  /** Opt-in complete assistant history for compatible Chat Completions endpoints. */
+  preserveAssistantHistory?: boolean;
   includeReasoningDetails?: boolean;
   convertReasoningDetailsToContent?: boolean;
   preserveToolCacheControl?: boolean;
@@ -1860,6 +1862,7 @@ class LibreChatOpenAICompletions extends OriginalChatOpenAICompletions {
   }
 
   private includeReasoningContent?: boolean;
+  private preserveAssistantHistory?: boolean;
   private includeReasoningDetails?: boolean;
   private convertReasoningDetailsToContent?: boolean;
   private preserveToolCacheControl?: boolean;
@@ -1869,6 +1872,7 @@ class LibreChatOpenAICompletions extends OriginalChatOpenAICompletions {
   constructor(fields?: LibreChatOpenAIFields) {
     super(fields);
     this.includeReasoningContent = fields?.includeReasoningContent;
+    this.preserveAssistantHistory = fields?.preserveAssistantHistory;
     this.includeReasoningDetails = fields?.includeReasoningDetails;
     this.convertReasoningDetailsToContent =
       fields?.convertReasoningDetailsToContent;
@@ -1964,6 +1968,7 @@ class LibreChatOpenAICompletions extends OriginalChatOpenAICompletions {
     runManager?: CallbackManagerForLLMRun
   ): Promise<ChatResult> {
     if (
+      this.preserveAssistantHistory !== true &&
       this.includeReasoningContent !== true &&
       this.includeReasoningDetails !== true
     ) {
@@ -1977,6 +1982,7 @@ class LibreChatOpenAICompletions extends OriginalChatOpenAICompletions {
       messages,
       this.model,
       {
+        preserveAssistantHistory: this.preserveAssistantHistory,
         includeReasoningContent: this.includeReasoningContent,
         includeReasoningDetails: this.includeReasoningDetails,
         convertReasoningDetailsToContent: this.convertReasoningDetailsToContent,
@@ -2137,6 +2143,7 @@ class LibreChatOpenAICompletions extends OriginalChatOpenAICompletions {
     runManager?: CallbackManagerForLLMRun
   ): AsyncGenerator<ChatGenerationChunk> {
     if (
+      this.preserveAssistantHistory !== true &&
       this.includeReasoningContent !== true &&
       this.includeReasoningDetails !== true
     ) {
@@ -2146,6 +2153,7 @@ class LibreChatOpenAICompletions extends OriginalChatOpenAICompletions {
 
     const messagesMapped: OpenAICompletionParam[] =
       _convertMessagesToOpenAIParams(messages, this.model, {
+        preserveAssistantHistory: this.preserveAssistantHistory,
         includeReasoningContent: this.includeReasoningContent,
         includeReasoningDetails: this.includeReasoningDetails,
         convertReasoningDetailsToContent: this.convertReasoningDetailsToContent,
