@@ -44,7 +44,7 @@ export class AnthropicToolsOutputParser<
   }
 
   protected async _validateResult(result: unknown): Promise<T> {
-    let parsedResult = result;
+    let parsedResult: typeof result;
     if (typeof result === 'string') {
       try {
         parsedResult = JSON.parse(result);
@@ -92,7 +92,7 @@ export class AnthropicToolsOutputParser<
       const tool = extractToolCalls(message.content)[0];
       return tool;
     });
-    if (tools[0] === undefined) {
+    if (tools.at(0) === undefined) {
       throw new Error(
         'No parseable tool calls provided to AnthropicToolsOutputParser.'
       );

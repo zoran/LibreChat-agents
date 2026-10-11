@@ -98,6 +98,7 @@ function serializeForLabel(value: unknown, limit: number): string {
   let budget = limit * 4;
   try {
     return (
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Keep defensive checks for untyped external data; nominal provider types do not prove the runtime value.
       JSON.stringify(value, (_key, nested: unknown) => {
         if (budget <= 0) {
           throw ABORT_SERIALIZATION;
@@ -382,6 +383,7 @@ export function buildActivityPhaseLabelPrompt({
       return `${index + 1}. ${status}${evidence.length > 0 ? `: ${evidence.join('; ')}` : ''}`;
     });
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- The callback above mutates this flag synchronously; control-flow narrowing cannot see that write.
   if (!hasDescribableEvidence) {
     return '';
   }

@@ -132,6 +132,7 @@ function extractGenericMessageCustomRole(message: ChatMessage) {
     message.role !== 'function' &&
     message.role !== 'tool'
   ) {
+    // eslint-disable-next-line no-console -- Retain the operator warning at this standalone boundary without an injected logger.
     console.warn(`Unknown message role: ${message.role}`);
   }
 
@@ -179,6 +180,7 @@ const completionsApiContentBlockConverter: StandardContentBlockConverter<{
         type: 'image_url',
         image_url: {
           url: block.url,
+          // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- Provider extension metadata intentionally uses truthy fallback and omits empty values.
           ...(block.metadata?.detail
             ? { detail: block.metadata.detail as 'auto' | 'low' | 'high' }
             : {}),
@@ -192,6 +194,7 @@ const completionsApiContentBlockConverter: StandardContentBlockConverter<{
         type: 'image_url',
         image_url: {
           url,
+          // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- Provider extension metadata intentionally uses truthy fallback and omits empty values.
           ...(block.metadata?.detail
             ? { detail: block.metadata.detail as 'auto' | 'low' | 'high' }
             : {}),
@@ -213,7 +216,7 @@ const completionsApiContentBlockConverter: StandardContentBlockConverter<{
         );
       }
 
-      const rawMimeType = data.mime_type || block.mime_type || '';
+      const rawMimeType = data.mime_type || (block.mime_type ?? '');
       let mimeType: { type: string; subtype: string };
 
       try {
@@ -289,8 +292,10 @@ const completionsApiContentBlockConverter: StandardContentBlockConverter<{
         type: 'file',
         file: {
           file_data: block.url, // formatted as base64 data URL
+          // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- Provider extension metadata intentionally uses truthy fallback and omits empty values.
           ...(block.metadata?.filename || block.metadata?.name
             ? {
+              // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- Provider extension metadata intentionally uses truthy fallback and omits empty values.
               filename: (block.metadata.filename ||
                   block.metadata.name) as string,
             }
@@ -304,11 +309,16 @@ const completionsApiContentBlockConverter: StandardContentBlockConverter<{
         type: 'file',
         file: {
           file_data: `data:${block.mime_type ?? ''};base64,${block.data}`,
+          // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- Provider extension metadata intentionally uses truthy fallback and omits empty values.
           ...(block.metadata?.filename ||
+          // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- Provider extension metadata intentionally uses truthy fallback and omits empty values.
           block.metadata?.name ||
+          // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- Provider extension metadata intentionally uses truthy fallback and omits empty values.
           block.metadata?.title
             ? {
+              // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- Provider extension metadata intentionally uses truthy fallback and omits empty values.
               filename: (block.metadata.filename ||
+                  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- Provider extension metadata intentionally uses truthy fallback and omits empty values.
                   block.metadata.name ||
                   block.metadata.title) as string,
             }
@@ -414,12 +424,13 @@ export function _convertMessagesToOpenAIParams(
       completionParam.function_call = message.additional_kwargs.function_call;
       completionParam.content = '';
     }
-    if (isAIMessage(message) && !!message.tool_calls?.length) {
+    if (isAIMessage(message) && message.tool_calls != null && message.tool_calls.length > 0) {
       messageHasToolCalls = true;
       completionParam.tool_calls = message.tool_calls.map(
         convertLangChainToolCallToBoundedOpenAI
       );
       completionParam.content =
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- The callback above mutates this flag synchronously; control-flow narrowing cannot see that write.
         options?.preserveAssistantHistory === true || hasReasoningBlock
           ? content
           : '';
@@ -520,6 +531,7 @@ export function _convertMessagesToOpenAIParams(
           }
         }
       }
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Keep defensive checks for untyped external data; nominal provider types do not prove the runtime value.
       if ((message as ToolMessage).tool_call_id != null) {
         messageIsToolResult = true;
         completionParam.tool_call_id = (message as ToolMessage).tool_call_id;
@@ -545,6 +557,7 @@ export function _convertMessagesToOpenAIParams(
     }
 
     if (
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- Provider extension metadata intentionally uses truthy fallback and omits empty values.
       message.additional_kwargs.audio &&
       typeof message.additional_kwargs.audio === 'object' &&
       'id' in message.additional_kwargs.audio
@@ -656,7 +669,7 @@ export function _convertMessagesToOpenAIResponsesParams(
         return {
           type: 'function_call_output',
           call_id: toolMessage.tool_call_id,
-          id: toolMessage.id?.startsWith('fc_') ? toolMessage.id : undefined,
+          id: toolMessage.id?.startsWith('fc_') === true ? toolMessage.id : undefined,
           output:
             typeof toolMessage.content !== 'string'
               ? serializeStructuredValueBounded(
@@ -670,7 +683,7 @@ export function _convertMessagesToOpenAIResponsesParams(
       if (role === 'assistant') {
         // if we have the original response items, just reuse them
         if (
-          !zdrEnabled &&
+          zdrEnabled !== true &&
           responseMetadata.output != null &&
           Array.isArray(responseMetadata.output) &&
           responseMetadata.output.length > 0 &&
@@ -684,7 +697,7 @@ export function _convertMessagesToOpenAIResponsesParams(
         const input: ResponsesInputItem[] = [];
 
         // reasoning items
-        if (additional_kwargs.reasoning && !zdrEnabled) {
+        if (additional_kwargs.reasoning && zdrEnabled !== true) {
           const reasoningItem = _convertReasoningSummaryToOpenAIResponsesParams(
             additional_kwargs.reasoning
           );
@@ -699,7 +712,7 @@ export function _convertMessagesToOpenAIResponsesParams(
               | OpenAIClient.Responses.ResponseOutputText
               | OpenAIClient.Responses.ResponseOutputRefusal
             >;
-        if (additional_kwargs.refusal) {
+        if (additional_kwargs.refusal != null && additional_kwargs.refusal !== '') {
           if (typeof content === 'string') {
             content = [{ type: 'output_text', text: content, annotations: [] }];
           }
@@ -712,7 +725,7 @@ export function _convertMessagesToOpenAIResponsesParams(
         input.push({
           type: 'message',
           role: 'assistant',
-          ...(lcMsg.id && !zdrEnabled && lcMsg.id.startsWith('msg_')
+          ...(lcMsg.id != null && lcMsg.id !== '' && zdrEnabled !== true && lcMsg.id.startsWith('msg_')
             ? { id: lcMsg.id }
             : {}),
           content:
@@ -740,7 +753,7 @@ export function _convertMessagesToOpenAIResponsesParams(
 
         const functionCallIds = additional_kwargs[_FUNCTION_CALL_IDS_MAP_KEY];
 
-        if (isAIMessage(lcMsg) && !!lcMsg.tool_calls?.length) {
+        if (isAIMessage(lcMsg) && lcMsg.tool_calls != null && lcMsg.tool_calls.length > 0) {
           input.push(
             ...lcMsg.tool_calls.map(
               (toolCall): ResponsesInputItem => ({
@@ -751,7 +764,7 @@ export function _convertMessagesToOpenAIResponsesParams(
                   MAX_PROVIDER_TOOL_CALL_INPUT_CHARS
                 ),
                 call_id: toolCall.id!,
-                ...(zdrEnabled ? { id: functionCallIds?.[toolCall.id!] } : {}),
+                ...(zdrEnabled === true ? { id: functionCallIds?.[toolCall.id!] } : {}),
               })
             )
           );
@@ -763,7 +776,7 @@ export function _convertMessagesToOpenAIResponsesParams(
                 name: toolCall.function.name,
                 call_id: toolCall.id,
                 arguments: toolCall.function.arguments,
-                ...(zdrEnabled ? { id: functionCallIds?.[toolCall.id] } : {}),
+                ...(zdrEnabled === true ? { id: functionCallIds?.[toolCall.id] } : {}),
               })
             )
           );
@@ -796,6 +809,7 @@ export function _convertMessagesToOpenAIResponsesParams(
         return input;
       }
 
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Keep defensive checks for untyped external data; nominal provider types do not prove the runtime value.
       if (role === 'user' || role === 'system' || role === 'developer') {
         if (typeof lcMsg.content === 'string') {
           return { type: 'message', role, content: lcMsg.content };
@@ -863,6 +877,7 @@ export function _convertMessagesToOpenAIResponsesParams(
         return messages;
       }
 
+      // eslint-disable-next-line no-console -- Retain the operator warning at this standalone boundary without an injected logger.
       console.warn(
         `Unsupported role found when converting to OpenAI Responses API: ${role}`
       );
@@ -929,6 +944,7 @@ function _convertOpenAIResponsesMessageToBaseMessage(
             };
           }
 
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Keep defensive checks for untyped external data; nominal provider types do not prove the runtime value.
           if (part.type === 'refusal') {
             additional_kwargs.refusal = part.refusal;
             return [];
@@ -959,7 +975,7 @@ function _convertOpenAIResponsesMessageToBaseMessage(
       }
 
       additional_kwargs[_FUNCTION_CALL_IDS_MAP_KEY] ??= {};
-      if (item.id) {
+      if (item.id != null && item.id !== '') {
         additional_kwargs[_FUNCTION_CALL_IDS_MAP_KEY][item.call_id] = item.id;
       }
     } else if (item.type === 'reasoning') {
@@ -1100,6 +1116,7 @@ export function _convertOpenAIResponsesDeltaToBaseMessageChunk(
     'item' in chunk &&
     chunk.item.type === 'reasoning'
   ) {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/strict-boolean-expressions -- Keep defensive checks for untyped external data; nominal provider types do not prove the runtime value.
     const summary: ChatOpenAIReasoningSummary['summary'] | undefined = chunk
       .item.summary
       ? chunk.item.summary.map((s, index) => ({

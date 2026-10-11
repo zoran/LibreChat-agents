@@ -170,7 +170,7 @@ export class CustomChatGoogleGenerativeAI extends ChatGoogleGenerativeAI {
       total_tokens: usageMetadata.totalTokenCount ?? 0,
     };
 
-    if (usageMetadata.cachedContentTokenCount) {
+    if (usageMetadata.cachedContentTokenCount != null && usageMetadata.cachedContentTokenCount > 0) {
       output.input_token_details ??= {};
       output.input_token_details.cache_read =
         usageMetadata.cachedContentTokenCount;

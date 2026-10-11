@@ -132,6 +132,10 @@ import {
   resolveToolOutputTracingConfig,
 } from '@/langfuseConfig';
 import {
+  ProviderTextProtectionError,
+  validateProviderTextProtection,
+} from '@/protection/providerText';
+import {
   annotateMessagesForLLM,
   ToolOutputReferenceRegistry,
 } from '@/tools/toolOutputReferences';
@@ -139,6 +143,10 @@ import {
   InvalidModelToolCallError,
   snapshotAcceptedModelResponse,
 } from './acceptedModelResponse';
+import {
+  collectSubagentHostArgNames,
+  pickSubagentHostArgInput,
+} from '@/tools/subagent/hostArgs';
 import {
   prepareProviderRequest,
   usesNativeOpenAIResponses,
@@ -1369,6 +1377,7 @@ export class StandardGraph extends Graph<t.BaseGraphState, t.GraphNode> {
   /** See {@link t.StandardGraphInput.subagentExecutionContext}. */
   readonly subagentExecutionContext?: t.SubagentExecutionContext;
   private readonly subagentContext?: t.SubagentContextAdapter;
+  private readonly onSubagentResolutionFailure?: t.StandardGraphInput['onSubagentResolutionFailure'];
   /** See {@link t.StandardGraphInput.preemption}. */
   preemption?: t.StreamPreemption;
   /**
@@ -1377,6 +1386,8 @@ export class StandardGraph extends Graph<t.BaseGraphState, t.GraphNode> {
    * these on every streamed chunk event.
    */
   streamLimits: ResolvedStreamLimits;
+  /** Default-off mandatory provider prose release. */
+  providerTextProtection?: t.StandardGraphInput['providerTextProtection'];
   /**
    * Cumulative streamed argument bytes per in-flight tool call, keyed by
    * generation key + chunk index (see `resolveGenerationKey`). Per-run
@@ -1422,25 +1433,31 @@ export class StandardGraph extends Graph<t.BaseGraphState, t.GraphNode> {
    * attempt lease; spans resets on purpose. */
   activeStreamLimitGenerations?: Set<string>;
 
-  /** The stream-limit error behind an already-fired breaker, whether this
+  /** The safety error behind an already-fired breaker, whether this
    * graph's own controller tripped or a parent run's breaker arrived through
    * the composed constructor signal (child graphs own separate controllers).
    * Providers can translate either abort into a generic error, and recovery
    * paths must not run in that state. */
   protected resolveTrippedBreakerReason(
     breakerSignal: AbortSignal = this.breakerAbort.signal
-  ): StreamLimitExceededError | PreparedSubagentError | undefined {
+  ):
+    | StreamLimitExceededError
+    | PreparedSubagentError
+    | ProviderTextProtectionError
+    | undefined {
     if (
       breakerSignal.aborted &&
       (breakerSignal.reason instanceof StreamLimitExceededError ||
-        breakerSignal.reason instanceof PreparedSubagentError)
+        breakerSignal.reason instanceof PreparedSubagentError ||
+        breakerSignal.reason instanceof ProviderTextProtectionError)
     ) {
       return breakerSignal.reason;
     }
     if (
       this.signal?.aborted === true &&
       (this.signal.reason instanceof StreamLimitExceededError ||
-        this.signal.reason instanceof PreparedSubagentError)
+        this.signal.reason instanceof PreparedSubagentError ||
+        this.signal.reason instanceof ProviderTextProtectionError)
     ) {
       return this.signal.reason;
     }
@@ -1547,8 +1564,10 @@ export class StandardGraph extends Graph<t.BaseGraphState, t.GraphNode> {
       subagentScope,
       subagentExecutionContext,
       subagentContext,
+      onSubagentResolutionFailure,
       preemption,
       streamLimits,
+      providerTextProtection,
       toolExecution,
       clientDelegatedToolNames,
     }: t.StandardGraphInput,
@@ -1575,10 +1594,17 @@ export class StandardGraph extends Graph<t.BaseGraphState, t.GraphNode> {
     this.subagentScope = subagentScope === true;
     this.subagentExecutionContext = subagentExecutionContext;
     this.subagentContext = subagentContext;
+    this.onSubagentResolutionFailure = onSubagentResolutionFailure;
     this.preemption = preemption;
     this.streamLimits = resolveStreamLimits(streamLimits);
+    if (providerTextProtection != null)
+      validateProviderTextProtection(providerTextProtection);
+    this.providerTextProtection = providerTextProtection;
     this.toolExecution = toolExecution;
-    if (clientDelegatedToolNames != null && clientDelegatedToolNames.length > 0) {
+    if (
+      clientDelegatedToolNames != null &&
+      clientDelegatedToolNames.length > 0
+    ) {
       if (agents.length !== 1) {
         throw new Error('Client tool delegation requires a single-agent graph');
       }
@@ -4401,7 +4427,12 @@ export class StandardGraph extends Graph<t.BaseGraphState, t.GraphNode> {
          * succeeding fallback would resolve a run the public contract says
          * must reject. Rethrow before any recovery path.
          */
-        if (primaryError instanceof InvalidModelToolCallError) {
+        if (
+          primaryError instanceof InvalidModelToolCallError ||
+          primaryError instanceof ProviderTextProtectionError
+        ) {
+          if (primaryError instanceof ProviderTextProtectionError)
+            attemptBreaker.abort(primaryError);
           throw primaryError;
         }
         if (
@@ -4744,7 +4775,12 @@ export class StandardGraph extends Graph<t.BaseGraphState, t.GraphNode> {
               })
           );
         } catch (fallbackError) {
-          if (fallbackError instanceof InvalidModelToolCallError) {
+          if (
+            fallbackError instanceof InvalidModelToolCallError ||
+            fallbackError instanceof ProviderTextProtectionError
+          ) {
+            if (fallbackError instanceof ProviderTextProtectionError)
+              attemptBreaker.abort(fallbackError);
             throw fallbackError;
           }
           if (
@@ -5342,7 +5378,9 @@ export class StandardGraph extends Graph<t.BaseGraphState, t.GraphNode> {
           usageSink: this.subagentUsageSink,
           taskConfig: this.subagentTasks,
           subagentContext: this.subagentContext,
+          onResolutionFailure: this.onSubagentResolutionFailure,
           streamLimits: this.streamLimits,
+          providerTextProtection: this.providerTextProtection,
           humanInTheLoop: this.humanInTheLoop,
           checkpointer: this.compileOptions?.checkpointer,
           maxDepth: effectiveSubagentDepth,
@@ -5357,6 +5395,7 @@ export class StandardGraph extends Graph<t.BaseGraphState, t.GraphNode> {
           ): GraphFactory => snapshotChildGraphFactory(parentHandlerRegistry),
         });
         this.registerSubagentExecutor(executor);
+        const hostArgNames = collectSubagentHostArgNames(executableConfigs);
 
         const subagentTool = tool(
           async (rawInput, config) => {
@@ -5366,6 +5405,10 @@ export class StandardGraph extends Graph<t.BaseGraphState, t.GraphNode> {
               subagent_thread_id?: string;
               run_in_background?: boolean;
             };
+            const hostArgInput = pickSubagentHostArgInput(input, hostArgNames);
+            if (!hostArgInput.ok) {
+              return hostArgInput.message;
+            }
             const description =
               typeof input.description === 'string' &&
               input.description.trim().length > 0
@@ -5422,6 +5465,9 @@ export class StandardGraph extends Graph<t.BaseGraphState, t.GraphNode> {
               parentConfigurable: config.configurable as
                 | Record<string, unknown>
                 | undefined,
+              ...(hostArgInput.hostArgs == null
+                ? {}
+                : { hostArgs: hostArgInput.hostArgs }),
             };
             if (input.run_in_background === true) {
               return executor.executeInBackground({
@@ -5552,8 +5598,10 @@ export class StandardGraph extends Graph<t.BaseGraphState, t.GraphNode> {
       const delegatedNames = this.clientDelegatedToolNames;
       if (delegatedNames != null && delegatedNames.size > 0) {
         const { messages } = state as t.BaseGraphState;
-        const last = messages[messages.length - 1] as AIMessageChunk | undefined;
-        const calls = last?.getType() === 'ai' ? last.tool_calls ?? [] : [];
+        const last = messages[messages.length - 1] as
+          | AIMessageChunk
+          | undefined;
+        const calls = last?.getType() === 'ai' ? (last.tool_calls ?? []) : [];
         if (calls.some((call) => delegatedNames.has(call.name))) {
           if (
             calls.some(

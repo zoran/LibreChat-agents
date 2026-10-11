@@ -42,6 +42,7 @@ import {
   HookRegistry,
   TOOL_APPROVAL_EXECUTION_SCOPE_CONFIG_KEY,
 } from '@/hooks';
+import { ProviderTextProtectionError } from '@/protection/providerText';
 import { SubagentExecutor } from '@/tools/subagent/SubagentExecutor';
 import { AgentContext } from '@/agents/AgentContext';
 import { Providers } from '@/common';
@@ -228,12 +229,12 @@ describe('SubagentExecutor lazy selected-subagent resolution', () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
       '[SubagentExecutor] Subagent resolution failed',
-      {
+      expect.objectContaining({
         phase: 'config',
         subagentType: 'failing',
         aborted: false,
         type: 'Error',
-      }
+      })
     );
     expect(JSON.stringify(warn.mock.calls)).not.toContain('oauth-token');
     warn.mockRestore();
@@ -1960,7 +1961,7 @@ describe('SubagentExecutor lazy selected-subagent resolution', () => {
           id: 'allowed-user',
           role: 'member',
           tenantId: 'tenant-1',
-          privateToken: 'principal-secret',
+          privateToken: 'test-principal-secret',
         },
         user_id: 'allowed-user',
         userMCPAuthMap: { private: { token: 'mcp-secret' } },
@@ -2016,7 +2017,10 @@ describe('SubagentExecutor lazy selected-subagent resolution', () => {
     expect(result.content).not.toContain('private cancellation reason');
   });
 
-  it('rethrows a stream-limit trip while awaiting lazy resolution', async () => {
+  it.each([
+    { label: 'stream limit', trip: new StreamLimitExceededError({ kind: 'tool_call_args', limit: 10, observed: 11, toolName: 'db_query' }) },
+    { label: 'protection', trip: new ProviderTextProtectionError('blocked') },
+  ])('rethrows a $label trip while awaiting lazy resolution', async ({ trip }) => {
     const breaker = new AbortController();
     let markResolutionStarted = (): void => undefined;
     const resolutionStarted = new Promise<void>((resolve) => {
@@ -2027,13 +2031,6 @@ describe('SubagentExecutor lazy selected-subagent resolution', () => {
       return new Promise<AgentInputs>(() => undefined);
     });
     const executor = createExecutor([config]);
-    const trip = new StreamLimitExceededError({
-      kind: 'tool_call_args',
-      limit: 10,
-      observed: 11,
-      toolName: 'db_query',
-    });
-
     const execution = executor.execute({
       description: 'Stop this selection.',
       subagentType: config.type,

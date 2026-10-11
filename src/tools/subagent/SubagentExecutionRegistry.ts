@@ -63,6 +63,8 @@ export type SubagentInvocationBinding = Readonly<{
   description: string;
   subagentType: string;
   configId?: string;
+  /** Value-free identity of the call's validated host arguments. */
+  hostArgsDigest?: string;
 }>;
 
 export type SubagentSettlementBinding = Readonly<{
@@ -340,7 +342,8 @@ function assertCompatibleResumeExecution(
     current.parentToolCallId === next.parentToolCallId &&
     current.childRunId === next.childRunId &&
     current.subagentType === next.subagentType &&
-    current.configId === next.configId
+    current.configId === next.configId &&
+    current.hostArgsDigest === next.hostArgsDigest
   ) {
     return;
   }
@@ -354,7 +357,8 @@ function assertSameInvocation(
   if (
     current.description === next.description &&
     current.subagentType === next.subagentType &&
-    current.configId === next.configId
+    current.configId === next.configId &&
+    current.hostArgsDigest === next.hostArgsDigest
   ) {
     return;
   }
@@ -425,6 +429,7 @@ export class SubagentExecutionRecord<
   TSettledOutput = never,
 > {
   private identityValue?: SubagentExecutionIdentity;
+  private attemptedIdentityValue?: SubagentExecutionIdentity;
   private bindingValue?: SubagentDefinitionBinding;
   private bindingAuthority?: 'provisional' | 'effective';
   private invocationValue?: SubagentInvocationBinding;
@@ -486,6 +491,24 @@ export class SubagentExecutionRecord<
 
   get identity(): SubagentExecutionIdentity | undefined {
     return this.identityValue;
+  }
+
+  /** Correlation only; never committed identity or resume authority. */
+  get attemptedIdentity(): SubagentExecutionIdentity | undefined {
+    return this.attemptedIdentityValue;
+  }
+
+  recordIdentityAttempt(identity: SubagentExecutionIdentity): void {
+    const current = this.attemptedIdentityValue;
+    if (
+      current != null &&
+      current.childRunId === identity.childRunId &&
+      current.childThreadId === identity.childThreadId &&
+      current.approvalExecutionScope === identity.approvalExecutionScope
+    ) {
+      return;
+    }
+    this.attemptedIdentityValue = Object.freeze({ ...identity });
   }
 
   get binding(): SubagentDefinitionBinding | undefined {
@@ -570,6 +593,7 @@ export class SubagentExecutionRecord<
     if (this.pendingIdentityResolution != null) {
       return this.pendingIdentityResolution;
     }
+    this.attemptedIdentityValue = undefined;
     const pending = Promise.resolve()
       .then(() => {
         this.assertCurrentIdentityResolution(pending);
@@ -929,6 +953,7 @@ export class SubagentExecutionRegistry<
     if (this.recordsByAddress.get(record.address.key) !== record) {
       throw new SubagentExecutionInvalidatedError();
     }
+    record.recordIdentityAttempt(identity);
     const checkpointKey = getPreparationResourceKey(
       'checkpoint',
       identity.childThreadId

@@ -25,6 +25,7 @@ export function removeAdditionalProperties(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   obj: Record<string, any>
 ): GenerativeAIJsonSchema {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Keep defensive checks for untyped external data; nominal provider types do not prove the runtime value.
   if (typeof obj === 'object' && obj !== null) {
     const newObj = { ...obj };
 

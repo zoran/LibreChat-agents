@@ -137,6 +137,7 @@ function deepCloneContent<T extends string | MessageContentComplex[]>(
   }
   if (Array.isArray(content)) {
     return content.map((block) => {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Keep defensive checks for untyped external data; nominal provider types do not prove the runtime value.
       if (typeof block !== 'object' || block == null || isProxy(block)) {
         return block;
       }
@@ -726,6 +727,7 @@ export function addCacheControlToStablePrefixMessages<
 function hasAnthropicCacheControl(content: MessageContentComplex[]): boolean {
   for (let i = 0; i < content.length; i++) {
     const block = content[i];
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Keep defensive checks for untyped external data; nominal provider types do not prove the runtime value.
     if (typeof block !== 'object' || block == null || isProxy(block)) {
       continue;
     }
@@ -1039,7 +1041,6 @@ export function addBedrockTailCacheControl<
           cachePoint: buildBedrockCachePoint(ttl),
         } as MessageContentComplex);
         cachePointPlaced = true;
-        modified = true;
       }
     } else if (typeof content === 'string' && canPlaceCachePoint) {
       workingContent = [

@@ -542,7 +542,7 @@ export function createLocalWriteFileTool(
       let encoding = { text: '', hasBom: false, newline: '\n' as const } as
         | ReturnType<typeof decodeFile>
         | { text: string; hasBom: false; newline: '\n' };
-      let existed = false;
+      let existed: boolean;
       try {
         const raw = await fs.readFile(path, 'utf8');
         const decoded = decodeFile(raw);

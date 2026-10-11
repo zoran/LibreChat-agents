@@ -1,3 +1,4 @@
+import type { ProviderTextProtection } from '@/protection/providerText';
 // src/types/graph.ts
 import type {
   BaseMessage,
@@ -44,6 +45,7 @@ import type {
   StreamPreemption,
   TokenBudgetBreakdown,
 } from '@/types/run';
+import type { SubagentResolutionFailureHandler } from '@/tools/subagent/diagnostics';
 import type { SubagentTaskConfig } from '@/types/subagentTasks';
 import type { StandardGraph, MultiAgentGraph } from '@/graphs';
 import type { ProviderClientOptionsConfig } from '@/types/llm';
@@ -407,6 +409,7 @@ export type ModelEndData =
   | undefined;
 export type GraphTools = GenericTool[] | BindToolsInput[] | GoogleAIToolType[];
 export type StandardGraphInput = {
+  providerTextProtection?: ProviderTextProtection;
   runId?: string;
   signal?: AbortSignal;
   agents: AgentInputs[];
@@ -441,6 +444,8 @@ export type StandardGraphInput = {
   subagentTasks?: SubagentTaskConfig;
   /** Host-owned context and result projection for each isolated child execution. */
   subagentContext?: SubagentContextAdapter;
+  /** Receives private startup errors; returns only an SDK-owned public cause. */
+  onSubagentResolutionFailure?: SubagentResolutionFailureHandler;
   /**
    * True when this graph IS a subagent child run (set by `SubagentExecutor`
    * when it constructs the child graph). Drives the hook-input `agentId`
@@ -571,6 +576,31 @@ export interface SubagentResolveConfigurable {
   user_id?: string;
 }
 
+/**
+ * Optional string argument a host lets the parent model pass on a subagent
+ * call, such as where the child should run. The SDK checks the declared shape
+ * before resolution; the host still authorizes the value in its resolver.
+ */
+export interface SubagentHostArgSpec {
+  /** Model-facing explanation of the argument and when to pass it. */
+  description: string;
+  /**
+   * Values this subagent accepts. Omit to accept a bounded free-form string,
+   * whose format the resolver must check.
+   */
+  enum?: readonly string[];
+  /** Maximum length of a free-form value (at most 256). */
+  maxLength?: number;
+}
+
+/** Host argument declarations keyed by tool-call property name. */
+export type SubagentHostArgSpecs = Readonly<
+  Record<string, SubagentHostArgSpec>
+>;
+
+/** Validated host argument values from one subagent call. */
+export type SubagentHostArgs = Readonly<Record<string, string>>;
+
 /** Runtime context supplied when a host lazily resolves a selected subagent. */
 export interface SubagentResolveContext {
   /** Stable subagent identity selected by the model. */
@@ -589,6 +619,13 @@ export interface SubagentResolveContext {
   signal: AbortSignal;
   /** Stable, sanitized host context from the parent tool invocation. */
   configurable?: Readonly<SubagentResolveConfigurable>;
+  /**
+   * Values the parent passed for this subagent's declared `hostArgs`, already
+   * checked against the declaration. Omitted when the call passed none. Bound
+   * to the execution: a reconstruction with different values is rejected
+   * before the resolver runs.
+   */
+  hostArgs?: SubagentHostArgs;
 }
 
 /** Host contract for resolving a selected subagent's full graph inputs. */
@@ -620,6 +657,12 @@ export interface SubagentConfig extends SubagentConfigBase {
    * `(context.executionId, context.descriptor.configId)`.
    */
   resolveAgentInputs?: SubagentAgentInputsResolver;
+  /**
+   * Optional per-call arguments the parent model may pass for this subagent,
+   * delivered to `resolveAgentInputs` as `context.hostArgs`. Only lazy
+   * configs accept them. Declaring none leaves the tool schema unchanged.
+   */
+  hostArgs?: SubagentHostArgSpecs;
   /** When true, reuse the parent's AgentInputs (context isolation without separate config). */
   self?: boolean;
 }
@@ -636,6 +679,7 @@ export interface GraphSubagentConfig extends SubagentConfigBase {
   kind: 'graph';
   configId?: never;
   resolveAgentInputs?: never;
+  hostArgs?: never;
   allowNested?: false;
   agents: AgentInputs[];
   /**

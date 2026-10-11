@@ -36,7 +36,7 @@ function countCacheMarkers(
       continue;
     }
     for (const block of message.content) {
-      if (block && typeof block === 'object' && 'cache_control' in block) {
+      if (block != null && typeof block === 'object' && 'cache_control' in block) {
         count++;
       }
     }
@@ -379,7 +379,7 @@ function countCachePoints(
       continue;
     }
     for (const block of message.content) {
-      if (block && typeof block === 'object' && 'cachePoint' in block) {
+      if (block != null && typeof block === 'object' && 'cachePoint' in block) {
         count++;
       }
     }

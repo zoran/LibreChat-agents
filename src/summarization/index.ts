@@ -48,6 +48,7 @@ function warnUnrecognizedTriggerType(type: string): void {
     }
   }
   warnedUnrecognizedTriggerTypes.add(type);
+  // eslint-disable-next-line no-console -- Retain the operator warning at this standalone boundary without an injected logger.
   console.warn(
     `[shouldTriggerSummarization] Unrecognized trigger.type: "${type}". ` +
       `Summarization will not fire. Valid values: ${VALID_TRIGGER_TYPES.join(', ')}.`

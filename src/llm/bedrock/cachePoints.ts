@@ -11,7 +11,6 @@ function isConverseCachePoint(block: unknown): boolean {
     typeof block === 'object' &&
       block !== null &&
       'cachePoint' in block &&
-      block.cachePoint &&
       typeof block.cachePoint === 'object' &&
       block.cachePoint !== null &&
       'type' in block.cachePoint
@@ -64,6 +63,7 @@ export function applyCachePointsToConversePayload(fields: {
       lastContent.some(
         (block) =>
           typeof block === 'object' &&
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Keep defensive checks for untyped external data; nominal provider types do not prove the runtime value.
           block !== null &&
           ('toolResult' in block || 'toolUse' in block)
       );

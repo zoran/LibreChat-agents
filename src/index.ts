@@ -16,6 +16,7 @@ export * from './summarization';
 
 /* Tools */
 export * from './tools/Calculator';
+export * from './tools/GitHubCompare';
 export * from './tools/CodeExecutor';
 export * from './tools/BashExecutor';
 export * from './tools/ProgrammaticToolCalling';
@@ -119,3 +120,12 @@ export type {
   StreamLimitState,
   StreamLimitKind,
 } from './llm/streamLimits';
+export * from './decisions';
+export * from './rerank';
+
+export { PROVIDER_TEXT_PROTECTION_VERSION, ProviderTextProtectionError } from './protection/providerText';
+export type {
+  ProviderTextProtection,
+  ProviderTextProtectionResult,
+  ProviderTextProtectionErrorCode,
+} from './protection/providerText';

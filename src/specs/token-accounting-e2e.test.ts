@@ -454,7 +454,7 @@ describe('Token accounting E2E — Run + Graph + real token counter', () => {
 
     conversationHistory.push(new HumanMessage('Continue.'));
 
-    let pruningOccurred = false;
+    let pruningOccurred: boolean;
     try {
       await run.processStream(
         { messages: conversationHistory },

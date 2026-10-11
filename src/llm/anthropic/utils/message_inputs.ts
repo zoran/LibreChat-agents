@@ -164,6 +164,7 @@ function hoistToolResultCacheControl(
   }
   let cacheControl: unknown;
   const stripped = content.map((block) => {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Keep defensive checks for untyped external data; nominal provider types do not prove the runtime value.
     if (typeof block !== 'object' || block == null || isProxy(block)) {
       return block;
     }
@@ -207,6 +208,7 @@ function unwrapToolMessageResultContent(content: ToolMessage['content']): {
   }
 
   const block = content[0];
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Keep defensive checks for untyped external data; nominal provider types do not prove the runtime value.
   if (typeof block !== 'object' || block == null || isProxy(block)) {
     return { content, cacheControl: undefined, isError: undefined };
   }

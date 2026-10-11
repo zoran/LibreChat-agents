@@ -1349,6 +1349,7 @@ ${mcpNote}${toolsListSection}
         };
 
         const proxyAgent = resolveFetchProxyAgent(EXEC_ENDPOINT);
+        // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions -- The node-fetch agent union uses a falsy value to disable proxying.
         if (proxyAgent) {
           fetchOptions.agent = proxyAgent;
         }

@@ -404,7 +404,7 @@ describe('formatAgentMessages skill body reconstruction', () => {
       let assistantTotal = 0;
       for (const [idx, count] of Object.entries(indexTokenCountMap!)) {
         if (Number(idx) > 0 && Number(idx) < injectedIndex) {
-          assistantTotal += count ?? 0;
+          assistantTotal += count;
         }
       }
       expect(assistantTotal).toBe(500);

@@ -257,7 +257,7 @@ function addLatestUserOnlyBedrockCacheControl(
     }
 
     let workingContent: MessageContentComplex[];
-    let modified = false;
+    let modified: boolean;
 
     if (hasArrayContent) {
       workingContent = stripCacheMarkers(content as MessageContentComplex[]);
