@@ -76,6 +76,11 @@ import {
   resolveToolOutputTracingConfig,
 } from '@/langfuseConfig';
 import {
+  getRunStepResumeState,
+  isRunStepResumeState,
+  stripRunStepResumeState,
+} from '@/tools/runStepResume';
+import {
   cloneToolApprovalInterruptPayload,
   TOOL_APPROVAL_REVIEW_CONFIG_KEY,
 } from '@/hitl/approvalReview';
@@ -93,10 +98,6 @@ import {
   resolveLangfuseRuntimeScope,
   withLangfuseRuntimeScope,
 } from '@/langfuseRuntimeScope';
-import {
-  getRunStepResumeState,
-  stripRunStepResumeState,
-} from '@/tools/runStepResume';
 import {
   createCompletionTitleRunnable,
   createTitleRunnable,
@@ -143,6 +144,25 @@ export const defaultOmitOptions = new Set([
   'maxOutputTokens',
   'additionalModelRequestFields',
 ]);
+
+export const CHECKPOINT_CONTINUATION_VERSION = 1;
+
+function snapshotCheckpointPolicy(
+  policy: { threadId?: string; durability?: string } | null | undefined
+): t.RunConfig['checkpointPolicy'] {
+  if (policy === undefined) return undefined;
+  if (
+    policy == null ||
+    typeof policy.threadId !== 'string' ||
+    policy.threadId.trim() === '' ||
+    policy.durability !== 'sync'
+  ) {
+    throw new Error(
+      'Invalid checkpoint policy: a thread and sync durability are required.'
+    );
+  }
+  return Object.freeze({ threadId: policy.threadId, durability: 'sync' });
+}
 
 const ACTIVITY_LABEL_TRACE_NAME = 'LibreChat Activity Label';
 const ACTIVITY_PHASE_TRACE_NAME = 'LibreChat Activity Phase';
@@ -294,6 +314,7 @@ function getInterruptHookSessionId(payload: unknown): string | undefined {
 
 type InterruptStateSnapshot = {
   config?: RunnableConfig;
+  next?: string[];
   values?: {
     handoffState?: t.HandoffState;
     messages?: BaseMessage[];
@@ -304,6 +325,18 @@ type InterruptStateSnapshot = {
     state?: RunnableConfig | InterruptStateSnapshot;
   }>;
 };
+
+function hasPendingCheckpointInterrupt(
+  snapshot: InterruptStateSnapshot
+): boolean {
+  return (snapshot.tasks ?? []).some((task) => {
+    if ((task.interrupts?.length ?? 0) > 0) return true;
+    const state = task.state;
+    return (
+      state != null && 'tasks' in state && hasPendingCheckpointInterrupt(state)
+    );
+  });
+}
 
 type WorkflowWithStateHistory = {
   getState?(
@@ -500,6 +533,9 @@ export class Run<_T extends t.BaseGraphState> {
    * caller options, dropping the fallback checkpointer from that metadata.
    */
   private hasCheckpointer: boolean = false;
+  private readonly hasExplicitCheckpointer: boolean;
+  private readonly checkpointPolicy: t.RunConfig['checkpointPolicy'];
+  private streamStarted = false;
   private _streamResult: t.MessageContentComplex[] | undefined;
   /**
    * Captured interrupt payload typed as `unknown` because the SDK
@@ -529,6 +565,15 @@ export class Run<_T extends t.BaseGraphState> {
     }
 
     this.id = runId;
+    this.checkpointPolicy = snapshotCheckpointPolicy(config.checkpointPolicy);
+    const checkpointer = config.graphConfig?.compileOptions?.checkpointer;
+    this.hasExplicitCheckpointer =
+      checkpointer != null && typeof checkpointer === 'object';
+    if (this.checkpointPolicy != null && !this.hasExplicitCheckpointer) {
+      throw new Error(
+        'Checkpoint policy requires an explicit host-supplied checkpointer.'
+      );
+    }
     this.tokenCounter = config.tokenCounter;
     this.indexTokenCountMap = config.indexTokenCountMap;
     if (config.calibrationRatio != null && config.calibrationRatio > 0) {
@@ -559,7 +604,9 @@ export class Run<_T extends t.BaseGraphState> {
       (config.clientDelegatedToolNames?.length ?? 0) > 0 &&
       handlerRegistry.getHandler(GraphEvents.ON_MODEL_RESPONSE) == null
     ) {
-      throw new Error('Client tool delegation requires an accepted-result handler');
+      throw new Error(
+        'Client tool delegation requires an accepted-result handler'
+      );
     }
     this.handlerRegistry = handlerRegistry;
     this.hookRegistry = config.hooks;
@@ -585,14 +632,19 @@ export class Run<_T extends t.BaseGraphState> {
     if (!config.graphConfig) {
       throw new Error('Graph config not provided');
     }
-    if ('providerTextProtection' in config.graphConfig &&
-        config.graphConfig.providerTextProtection != null) {
+    if (
+      'providerTextProtection' in config.graphConfig &&
+      config.graphConfig.providerTextProtection != null
+    ) {
       throw new ProviderTextProtectionError('incompatible');
     }
 
     /** Handle different graph types */
     if (config.graphConfig.type === 'multi-agent') {
-      if (this.clientDelegatedToolNames != null && this.clientDelegatedToolNames.length > 0) {
+      if (
+        this.clientDelegatedToolNames != null &&
+        this.clientDelegatedToolNames.length > 0
+      ) {
         throw new Error('Client tool delegation requires a single-agent graph');
       }
       this.graphRunnable = this.createMultiAgentGraph(config.graphConfig);
@@ -941,6 +993,17 @@ export class Run<_T extends t.BaseGraphState> {
   static async create<T extends t.BaseGraphState>(
     config: t.RunConfig
   ): Promise<Run<T>> {
+    const checkpointPolicy = snapshotCheckpointPolicy(config.checkpointPolicy);
+    if (checkpointPolicy != null) {
+      config = {
+        ...config,
+        checkpointPolicy,
+        graphConfig: {
+          ...config.graphConfig,
+          compileOptions: { ...config.graphConfig.compileOptions },
+        },
+      };
+    }
     await ensureSourceModeProviders();
     /** Create tokenCounter if indexTokenCountMap is provided but tokenCounter is
      *  not. The model is read through both option keys: `modelName` is
@@ -1089,7 +1152,8 @@ export class Run<_T extends t.BaseGraphState> {
       if (
         eventName === GraphEvents.ON_MODEL_RESPONSE ||
         eventName === GraphEvents.ON_MODEL_TOOLS_CLAIMED
-      ) return;
+      )
+        return;
       const handler = this.handlerRegistry?.getHandler(eventName);
       /**
        * Tool completions arriving over the custom-event channel are the only
@@ -1159,6 +1223,12 @@ export class Run<_T extends t.BaseGraphState> {
     return (
       this._interrupt != null && this._haltedReason == null && !streamThrew
     );
+  }
+
+  private assertFreshCheckpointRun(): void {
+    if (this.streamStarted) {
+      throw new Error('Checkpoint continuation requires a fresh Run instance.');
+    }
   }
 
   /**
@@ -1263,6 +1333,35 @@ export class Run<_T extends t.BaseGraphState> {
     callerConfig: t.RunStreamConfig,
     streamOptions?: t.EventStreamOptions
   ): Promise<MessageContentComplex[] | undefined> {
+    return this.processStreamInternal(
+      inputs,
+      this.applyCheckpointPolicy(callerConfig),
+      streamOptions
+    );
+  }
+
+  private applyCheckpointPolicy(
+    callerConfig: t.RunStreamConfig
+  ): t.RunStreamConfig {
+    const config = {
+      ...callerConfig,
+      configurable: { ...callerConfig.configurable },
+    };
+    if (this.checkpointPolicy == null) return config;
+    if (config.configurable.thread_id !== this.checkpointPolicy.threadId) {
+      throw new Error('Checkpoint policy thread does not match this Run.');
+    }
+    if (config.durability != null && config.durability !== 'sync') {
+      throw new Error('Checkpoint policy requires sync durability.');
+    }
+    return { ...config, durability: 'sync' };
+  }
+
+  private async processStreamInternal(
+    inputs: t.IState | Command | null,
+    callerConfig: t.RunStreamConfig,
+    streamOptions?: t.EventStreamOptions
+  ): Promise<MessageContentComplex[] | undefined> {
     if (this.graphRunnable == null) {
       throw new Error(
         'Run not initialized. Make sure to use Run.create() to instantiate the Run.'
@@ -1275,6 +1374,7 @@ export class Run<_T extends t.BaseGraphState> {
     }
     const graphRunnable = this.graphRunnable;
     const graph = this.Graph;
+    this.streamStarted = true;
     this._handoffOutcome = undefined;
 
     /**
@@ -1284,7 +1384,7 @@ export class Run<_T extends t.BaseGraphState> {
      * new prompt to evaluate) and read run-state from the Graph wrapper
      * instead of `inputs.messages`.
      */
-    const isResume = inputs instanceof Command;
+    const isResume = inputs === null || inputs instanceof Command;
     if (!isResume) {
       graph.startFreshLangfuseExecution();
     }
@@ -1319,11 +1419,8 @@ export class Run<_T extends t.BaseGraphState> {
       delete config.configurable?.[SUBAGENT_RESUME_MANIFEST_CONFIG_KEY];
     }
     let overwriteLegacyResumeState = false;
-    if (isResume) {
-      await this.restoreInterruptFromCheckpoint(
-        config,
-        (inputs as Command).update
-      );
+    if (inputs instanceof Command) {
+      await this.restoreInterruptFromCheckpoint(config, inputs.update);
       const publicPayload = stripRunStepResumeState(this._interrupt?.payload);
       if (config.configurable != null) {
         restoreToolReplayConfig(
@@ -1521,7 +1618,7 @@ export class Run<_T extends t.BaseGraphState> {
     let terminalAt: number | undefined;
 
     const consumeStream = async (): Promise<void> => {
-      let streamInputs: t.IState | Command = inputs;
+      let streamInputs: t.IState | Command | null = inputs;
       if (!isResume && graph.handoffRouting != null) {
         streamInputs = {
           ...(inputs as t.IState),
@@ -1545,14 +1642,8 @@ export class Run<_T extends t.BaseGraphState> {
       let streamConfig = config;
 
       for (;;) {
-        /**
-         * `streamEvents` accepts both state inputs and `Command` (resume) at
-         * runtime, but our `CompiledStateWorkflow` type narrows the first
-         * arg to `BaseGraphState`. Cast on the call so the resume path
-         * type-checks without widening the wrapper for every caller.
-         */
         const stream = graphRunnable.streamEvents(
-          streamInputs as t.IState,
+          streamInputs === null ? null : (streamInputs as t.IState),
           { ...streamConfig, runName: graph.runName },
           {
             raiseError: true,
@@ -1590,7 +1681,8 @@ export class Run<_T extends t.BaseGraphState> {
           if (
             eventName === GraphEvents.ON_MODEL_RESPONSE ||
             eventName === GraphEvents.ON_MODEL_TOOLS_CLAIMED
-          ) continue;
+          )
+            continue;
           const handler = this.handlerRegistry?.getHandler(eventName);
           if (handler) {
             await handler.handle(eventName, data, metadata, this.Graph);
@@ -2077,7 +2169,7 @@ export class Run<_T extends t.BaseGraphState> {
     >
   ): Promise<MessageContentComplex[] | undefined> {
     const resumeConfig = await this.resolveInterruptResumeConfig(
-      callerConfig,
+      this.applyCheckpointPolicy(callerConfig),
       commandOptions?.update
     );
     const interruptId = this._interrupt?.interruptId;
@@ -2102,6 +2194,88 @@ export class Run<_T extends t.BaseGraphState> {
       resumeConfig,
       streamOptions
     );
+  }
+
+  /**
+   * Continues pending root work on a fresh Run from the exact latest checkpoint without
+   * adding input or granting an interrupt. The host must authorize recovery and qualify
+   * its explicit saver for durable storage. Execution follows the validated head without an
+   * explicit checkpoint cursor so LangGraph preserves successful pending sibling writes;
+   * the host's exclusive ownership must cover the read-to-execution interval.
+   */
+  async continueFromCheckpoint(
+    callerConfig: t.RunStreamConfig,
+    streamOptions?: t.EventStreamOptions
+  ): Promise<MessageContentComplex[] | undefined> {
+    const config = this.applyCheckpointPolicy(callerConfig);
+    this.assertFreshCheckpointRun();
+    const threadId = config.configurable?.thread_id;
+    const checkpointId = config.configurable?.checkpoint_id;
+    const namespace = config.configurable?.checkpoint_ns ?? '';
+    if (
+      !this.hasExplicitCheckpointer ||
+      !this.hasCheckpointer ||
+      this.Graph == null ||
+      typeof threadId !== 'string' ||
+      threadId.trim() === '' ||
+      typeof checkpointId !== 'string' ||
+      checkpointId.trim() === '' ||
+      namespace !== ''
+    ) {
+      throw new Error(
+        'Checkpoint continuation requires an explicit saver and exact root thread/checkpoint identity.'
+      );
+    }
+    const workflow = this.graphRunnable as
+      | (t.CompiledStateWorkflow & WorkflowWithStateHistory)
+      | undefined;
+    if (typeof workflow?.getState !== 'function') {
+      throw new Error(
+        'Checkpoint continuation requires native checkpoint state.'
+      );
+    }
+    const latestConfig = {
+      ...config,
+      configurable: { ...config.configurable },
+    };
+    delete latestConfig.configurable.checkpoint_id;
+    delete latestConfig.configurable.checkpoint_map;
+    const snapshot = await workflow.getState(latestConfig, { subgraphs: true });
+    const actual = snapshot.config?.configurable;
+    if (
+      actual?.thread_id !== threadId ||
+      actual.checkpoint_id !== checkpointId ||
+      (actual.checkpoint_ns ?? '') !== namespace
+    ) {
+      throw new Error(
+        'Checkpoint identity is missing, stale, or belongs to another Run.'
+      );
+    }
+    if (hasPendingCheckpointInterrupt(snapshot)) {
+      throw new Error(
+        'Pending checkpoint interrupts require explicit resume decisions.'
+      );
+    }
+    if (!Array.isArray(snapshot.next) || snapshot.next.length === 0) {
+      throw new Error('Checkpoint has no pending work to continue.');
+    }
+    const messages = getPersistedMessages(snapshot);
+    const runStepState = snapshot.values?.runStepState;
+    if (
+      messages == null ||
+      !isRunStepResumeState(runStepState) ||
+      runStepState.runId !== this.id
+    ) {
+      throw new Error(
+        'Checkpoint is missing bound native Run identity, messages, or RunStep restoration state.'
+      );
+    }
+    this.assertFreshCheckpointRun();
+    this.Graph.handoffRouting?.resume(snapshot.values?.handoffState);
+    this.Graph.restoreRunStepResumeState(runStepState);
+    this.Graph.restoreCheckpointMessages(messages);
+    this.activityPhaseTraceInput = findActivityPhaseTraceInput(messages);
+    return this.processStreamInternal(null, latestConfig, streamOptions);
   }
 
   private async resolveInterruptResumeConfig(

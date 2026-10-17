@@ -2031,6 +2031,7 @@ export class StandardGraph extends Graph<t.BaseGraphState, t.GraphNode> {
     }
     return {
       version: 1,
+      ...(this.runId == null ? {} : { runId: this.runId }),
       revision: this.runStepStateRevision,
       nextIndex: this.nextContentIndex,
       stopContinuationCount: this.stopContinuationCount,

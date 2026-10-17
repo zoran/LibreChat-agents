@@ -19,6 +19,8 @@ export function isRunStepResumeState(
   const state = value as Partial<RunStepResumeState>;
   if (
     state.version !== 1 ||
+    (state.runId !== undefined &&
+      (typeof state.runId !== 'string' || state.runId.length === 0)) ||
     !Number.isSafeInteger(state.revision) ||
     (state.revision ?? -1) < 0 ||
     !Number.isSafeInteger(state.nextIndex) ||

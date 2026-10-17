@@ -188,6 +188,39 @@ These are output limits, not bounds on provider memory or tool execution.
 
 See [the design decision](docs/adr/0010-project-accepted-model-results.md).
 
+## Fortsetzen nach einer Unterbrechung
+
+`Run.continueFromCheckpoint(config, streamOptions?)` setzt noch offene Arbeit auf dem
+bestehenden LangGraph fort. Erstelle dafür eine **frische `Run`-Instanz** mit derselben
+`runId`, derselben Graph-/Toolkonfiguration und einem ausdrücklich vom Host bereitgestellten
+Checkpointer. Die Methode nimmt keinen neuen Prompt und keine Freigabeentscheidung an.
+
+Für dauerhafte Ausführung übergib an `Run.create` außerdem
+`checkpointPolicy: { threadId, durability: 'sync' }`. Das SDK friert diese Bindung ein:
+`processStream`, `resume` und `continueFromCheckpoint` verlangen danach genau diesen Thread;
+fehlende Durability wird `sync`, ausdrücklich schwächere Einstellungen werden abgewiesen.
+`CHECKPOINT_CONTINUATION_VERSION === 1` kennzeichnet diese Fähigkeit. Gewöhnliche Läufe ohne
+Profil behalten ihr bisheriges Verhalten.
+
+Übergib bei der Fortsetzung `configurable.thread_id`, die **exakte aktuelle**
+`configurable.checkpoint_id` und den leeren Root-Namespace. Das SDK prüft den neuesten Stand,
+die in `RunStepResumeState` gespeicherte Run-ID und tatsächlich offene Arbeit. Er lehnt
+fehlende, fremde, ältere oder bereits abgeschlossene Checkpoints ab. Ebenso lehnt er
+anstehende Interrupts ab: Dafür bleibt `resume(...)` mit der konkreten menschlichen
+Entscheidung zuständig. Alte Checkpoints ohne Run-ID bleiben über bestehende HITL-Wege
+verwendbar, berechtigen aber nicht zu dieser neuen Fortsetzung.
+
+Nach der Identitätsprüfung übergibt das SDK natives `null` ohne expliziten Checkpoint-Cursor
+an LangGraph. Dadurch bleiben dessen erfolgreiche Pending Writes paralleler Aufgaben
+wirksam. Der **Host muss den gesamten Zeitraum von Prüfung bis Ausführung exklusiv besitzen**,
+vorherige Writer nachweisbar beenden oder technisch sperren und aktuelle Berechtigungen
+prüfen. Diese Bibliotheksfunktion ist keine verteilte Sperre. Der Host verantwortet außerdem
+persistenten Speicher, Quellenscope, Löschung/Aufbewahrung, Aktionsfreigaben, Budgets und
+Idempotenz von Werkzeugwirkungen; ein bereitgestellter MemorySaver wird dadurch nicht dauerhaft.
+Das SDK rekonstruiert offene native Steps und ihre Indizes, kein zusätzliches Journal bereits
+abgeschlossener UI-Schritte. Ein aufgelöster Stream allein ist kein Erfolgsnachweis: Prüfe
+auch Interrupts, Halt-/Fehlerzustand und die erforderlichen Ergebnisse.
+
 ## Development
 
 Use Node.js 24 or newer and npm 10.5.2, as declared in `package.json`. A source
@@ -206,7 +239,7 @@ installation, including installation from an immutable Git commit. Keep npm
 lifecycle scripts enabled. Set `CI=true` to skip optional Git hook setup; the
 build still runs. After source edits, use `npm run build` to refresh `dist/`.
 
-This fork's `4.0.1+assistant-history.1` version adds explicit
+This fork retains explicit
 `preserveAssistantHistory: true` support to `formatAgentMessages` and the
 OpenAI-compatible `ChatOpenAI` adapter. Set it at both boundaries to retain
 persisted reasoning, visible text, and permitted tool-call/result order. Absent

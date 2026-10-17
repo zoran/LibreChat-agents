@@ -35,7 +35,11 @@ export type LegacyGraphConfig = BaseGraphConfig & {
      * via the top-level `RunConfig.streamLimits`; accepting the field here
      * would type-check but be silently ignored by `createLegacyGraph`.
      * Required provider-text protection also belongs only to RunConfig. */
-    'provider' | 'clientOptions' | 'agents' | 'streamLimits' | 'providerTextProtection'
+    | 'provider'
+    | 'clientOptions'
+    | 'agents'
+    | 'streamLimits'
+    | 'providerTextProtection'
   > &
   Omit<g.AgentInputs, 'provider' | 'clientOptions' | 'agentId'>;
 
@@ -271,6 +275,8 @@ export interface StreamLimits {
 }
 
 export type RunConfig = {
+  /** Host-owned recovery profile; the supplied saver owns persistence and scope authorization. */
+  checkpointPolicy?: Readonly<{ threadId: string; durability: 'sync' }>;
   runId: string;
   graphConfig: LegacyGraphConfig | StandardGraphConfig | MultiAgentGraphConfig;
   /**

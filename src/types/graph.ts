@@ -260,8 +260,9 @@ export type WorkflowValuesStreamConfig = RunnableConfig & {
 export type CompiledWorkflow<
   TInput extends BaseGraphState = BaseGraphState,
   TOutput extends BaseGraphState = TInput,
-> = Omit<Runnable<TInput, unknown>, 'invoke'> & {
+> = Omit<Runnable<TInput, unknown>, 'invoke' | 'streamEvents'> & {
   invoke(input: TInput, config?: RunnableConfig): Promise<TOutput>;
+  streamEvents: Runnable<TInput | null, unknown>['streamEvents'];
 };
 
 export type CompiledStateWorkflow = CompiledWorkflow;

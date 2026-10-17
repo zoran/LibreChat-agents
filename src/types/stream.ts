@@ -133,6 +133,8 @@ export interface RunStepResumeEntry {
 /** SDK-private state persisted in LangGraph checkpoints for process-safe resume. */
 export interface RunStepResumeState {
   version: 1;
+  /** Native Run identity; absent on legacy checkpoints that cannot admit automatic continuation. */
+  runId?: string;
   revision: number;
   nextIndex: number;
   /** Warm terminal continuations already admitted for this execution. */
