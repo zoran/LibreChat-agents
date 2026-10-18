@@ -1,6 +1,21 @@
 import { z } from 'zod';
 import { tool } from '@langchain/core/tools';
-import { HumanMessage, isBaseMessage } from '@langchain/core/messages';
+import {
+  AIMessage,
+  AIMessageChunk,
+  ChatMessage,
+  ChatMessageChunk,
+  FunctionMessage,
+  FunctionMessageChunk,
+  HumanMessage,
+  HumanMessageChunk,
+  RemoveMessage,
+  SystemMessage,
+  SystemMessageChunk,
+  ToolMessage,
+  ToolMessageChunk,
+  isBaseMessage,
+} from '@langchain/core/messages';
 import { MemorySaver, GraphRecursionError } from '@langchain/langgraph';
 import type { CallbackManagerForLLMRun } from '@langchain/core/callbacks/manager';
 import type { ChatGenerationChunk } from '@langchain/core/outputs';
@@ -103,6 +118,8 @@ async function createRun(options: {
   model?: FakeChatModel;
   tools?: t.AgentInputs['graphTools'];
   fallback?: boolean;
+  inspectCheckpointInput?: t.RunConfig['inspectCheckpointInput'];
+  hookText?: string;
 }) {
   const hooks: string[] = [];
   const steps: Array<{ id: string; index: number }> = [];
@@ -112,7 +129,8 @@ async function createRun(options: {
     hooks: [
       async () => {
         hooks.push('start');
-        return {};
+        return options.hookText != null && options.hookText.length > 0
+          ? { additionalContext: options.hookText } : {};
       },
     ],
   });
@@ -145,6 +163,7 @@ async function createRun(options: {
       ...(options.saver && { compileOptions: { checkpointer: options.saver } }),
     },
     checkpointPolicy: options.policy,
+    inspectCheckpointInput: options.inspectCheckpointInput,
     humanInTheLoop: { enabled: options.fallback === true },
     returnContent: true,
     skipCleanup: true,
@@ -647,4 +666,173 @@ describe('public native checkpoint continuation', () => {
         .filter((message) => message.getType() === 'human')
     ).toHaveLength(1);
   });
+});
+
+describe('prepared checkpoint input boundary', () => {
+  it.each([
+    new HumanMessage('native human'),
+    new HumanMessageChunk('native human chunk'),
+    new AIMessage('native AI'),
+    new AIMessageChunk('native AI chunk'),
+    new SystemMessage('native system'),
+    new SystemMessageChunk('native system chunk'),
+    new ChatMessage({ content: 'native chat', role: 'user' }),
+    new ChatMessageChunk({ content: 'native chat chunk', role: 'user' }),
+    new FunctionMessage({ content: 'native function', name: 'local' }),
+    new FunctionMessageChunk({ content: 'native function chunk', name: 'local' }),
+    new ToolMessage({ content: 'native tool', tool_call_id: 'local-tool' }),
+    new ToolMessageChunk({ content: 'native tool chunk', tool_call_id: 'local-tool' }),
+    new RemoveMessage({ id: 'source-human' }),
+  ].map((message) => ({ nativeName: message.constructor.name, message })))('preserves native $nativeName through inspection and checkpointing', async ({ message }) => {
+    const saver = new MemorySaver();
+    const put = jest.spyOn(saver, 'put');
+    const inspect = jest.fn(({ messages }: { messages: readonly BaseMessage[] }) => {
+      const detached = messages[1];
+      expect(Object.getPrototypeOf(detached)).toBe(Object.getPrototypeOf(message));
+      expect(detached).not.toBe(message);
+      expect(detached.content).toEqual(message.content);
+      expect(Object.isFrozen(detached)).toBe(true);
+      expect(detached.additional_kwargs).toEqual({ sourceMessageId: 'native-source' });
+      expect(detached.getType()).toBe(message.getType());
+    });
+    const fixture = await createRun({
+      saver,
+      policy: { threadId: THREAD, durability: 'sync' },
+      inspectCheckpointInput: inspect,
+    });
+    message.additional_kwargs = { sourceMessageId: 'native-source' };
+    await fixture.run.processStream({ messages: [...input().messages, message, new HumanMessage('continue')] }, config());
+    expect(inspect).toHaveBeenCalledTimes(1);
+    expect(put).toHaveBeenCalled();
+    expect(fixture.modelCalls).toHaveBeenCalledTimes(1);
+  });
+
+  // A frozen message must not retain a caller-controlled prototype whose inherited
+  // content can change after inspection and before the first checkpoint.
+  it.each(['inherited accessor', 'subclass'] as const)(
+    'rejects a custom message %s before inspection, checkpoint or provider',
+    async (kind) => {
+      const saver = new MemorySaver();
+      const put = jest.spyOn(saver, 'put');
+      const writes = jest.spyOn(saver, 'putWrites');
+      const inspect = jest.fn();
+      const fixture = await createRun({
+        saver,
+        policy: { threadId: THREAD, durability: 'sync' },
+        inspectCheckpointInput: inspect,
+      });
+      class CustomHumanMessage extends HumanMessage {}
+      const original = input();
+      if (kind === 'subclass') {
+        original.messages[0] = new CustomHumanMessage('original prompt');
+      } else {
+        const custom = Object.create(HumanMessage.prototype);
+        Object.defineProperties(custom, {
+          content: { get() { return this.reviewText; }, configurable: true },
+          reviewText: { value: 'original prompt', writable: true },
+        });
+        Object.setPrototypeOf(original.messages[0], custom);
+        Reflect.deleteProperty(original.messages[0], 'content');
+      }
+      await expect(fixture.run.processStream(original, config())).rejects.toThrow(
+        'Invalid prepared checkpoint input'
+      );
+      expect(inspect).not.toHaveBeenCalled();
+      expect(put).not.toHaveBeenCalled();
+      expect(writes).not.toHaveBeenCalled();
+      expect(fixture.modelCalls).not.toHaveBeenCalled();
+    }
+  );
+
+  it('inspects post-hook detached input before any checkpoint and preserves the inspected bytes', async () => {
+    const saver = new MemorySaver();
+    const put = jest.spyOn(saver, 'put');
+    const writes = jest.spyOn(saver, 'putWrites');
+    let entered!: () => void;
+    let release!: () => void;
+    const inspecting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let inspected: readonly BaseMessage[] = [];
+    const fixture = await createRun({
+      saver,
+      policy: { threadId: THREAD, durability: 'sync' },
+      hookText: 'trusted hook context',
+      inspectCheckpointInput: async ({ messages }) => {
+        inspected = messages;
+        expect(Object.isFrozen(messages)).toBe(true);
+        expect(
+          messages.some((message) => message.content === 'trusted hook context')
+        ).toBe(true);
+        entered();
+        await barrier;
+      },
+    });
+    const original = input();
+    original.messages[0].additional_kwargs = { nested: { value: 'before' } };
+    const pending = fixture.run.processStream(original, config());
+    await Promise.race([
+      inspecting,
+      pending.then(() => {
+        throw new Error('Inspection was not reached');
+      }),
+    ]);
+    expect(put).not.toHaveBeenCalled();
+    expect(writes).not.toHaveBeenCalled();
+    expect(fixture.modelCalls).not.toHaveBeenCalled();
+    original.messages[0].content = 'late caller mutation';
+    (original.messages[0].additional_kwargs.nested as { value: string }).value =
+      'after';
+    release();
+    await pending;
+    const messages = (await saver.getTuple(config()))!.checkpoint.channel_values
+      .messages as BaseMessage[];
+    expect(messages[0].content).toBe('original prompt');
+    expect(messages[0].additional_kwargs.nested).toEqual({ value: 'before' });
+    expect(inspected[0].content).toBe('original prompt');
+    expect(fixture.modelCalls).toHaveBeenCalledTimes(1);
+    expect(put).toHaveBeenCalled();
+  });
+
+  it.each(['rejected', 'accessor', 'cycle'] as const)(
+    'denies %s input before any durable write or model',
+    async (reason) => {
+      const saver = new MemorySaver();
+      const put = jest.spyOn(saver, 'put');
+      const writes = jest.spyOn(saver, 'putWrites');
+      const accessor = jest.fn(() => 'unsafe');
+      const fixture = await createRun({
+        saver,
+        policy: { threadId: THREAD, durability: 'sync' },
+        hookText: 'unaccepted hook context',
+        inspectCheckpointInput: ({ messages }) => {
+          expect(
+            messages.some(
+              (message) => message.content === 'unaccepted hook context'
+            )
+          ).toBe(true);
+          throw new Error('prepared input rejected');
+        },
+      });
+      const original = input();
+      if (reason === 'accessor')
+        Object.defineProperty(
+          original.messages[0].additional_kwargs,
+          'unsafe',
+          { get: accessor }
+        );
+      if (reason === 'cycle')
+        original.messages[0].additional_kwargs.cycle = original.messages[0];
+      await expect(
+        fixture.run.processStream(original, config())
+      ).rejects.toThrow();
+      expect(accessor).not.toHaveBeenCalled();
+      expect(put).not.toHaveBeenCalled();
+      expect(writes).not.toHaveBeenCalled();
+      expect(fixture.modelCalls).not.toHaveBeenCalled();
+    }
+  );
 });

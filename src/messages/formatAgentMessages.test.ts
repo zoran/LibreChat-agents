@@ -63,6 +63,41 @@ const getAnthropicPayloadBlocks = (
 };
 
 describe('formatAgentMessages', () => {
+  it.each(['user', 'system', 'assistant'] as const)(
+    'keeps whole-row provenance for scalar %s input and exact indices for native arrays',
+    (role) => {
+      const attribution =
+        role === 'user' ? 'user' : role === 'assistant' ? 'model' : 'synthetic';
+      const scalar = formatAgentMessages([
+        { role, messageId: 'scalar-source', content: 'document text' },
+      ]);
+      expect(scalar.messages[0].additional_kwargs.provenance).toEqual({
+        version: 1,
+        parts: [{ attribution, sourceMessageId: 'scalar-source' }],
+      });
+      const array = formatAgentMessages([
+        {
+          role,
+          messageId: 'array-source',
+          content: [
+            { type: ContentTypes.TEXT, text: 'first' },
+            { type: ContentTypes.TEXT, text: 'second' },
+          ],
+        },
+      ]);
+      expect(array.messages[0].additional_kwargs.provenance).toEqual({
+        version: 1,
+        parts: [
+          {
+            attribution,
+            sourceMessageId: 'array-source',
+            sourceContentPartIndices: [0, 1],
+          },
+        ],
+      });
+    }
+  );
+
   it('should format simple user and AI messages', () => {
     const payload: TPayload = [
       { role: 'user', content: 'Hello' },
@@ -292,7 +327,7 @@ describe('formatAgentMessages', () => {
       },
       {
         role: 'user',
-        content: 'who are 76ers\' opponents in current series?',
+        content: "who are 76ers' opponents in current series?",
       },
     ];
 
@@ -437,7 +472,7 @@ describe('formatAgentMessages', () => {
       },
       {
         role: 'user',
-        content: 'who are 76ers\' opponents in current series?',
+        content: "who are 76ers' opponents in current series?",
       },
     ];
 
@@ -1098,8 +1133,8 @@ describe('formatAgentMessages', () => {
     expect(
       messages.flatMap(
         (message) =>
-          getProviderMessageProvenance(message)?.parts.filter((part) =>
-            part.sourceContentPartIndices?.includes(1) === true
+          getProviderMessageProvenance(message)?.parts.filter(
+            (part) => part.sourceContentPartIndices?.includes(1) === true
           ) ?? []
       )
     ).toEqual([
@@ -1464,7 +1499,7 @@ describe('formatAgentMessages', () => {
         content: [
           {
             type: ContentTypes.TEXT,
-            [ContentTypes.TEXT]: 'I\'ll search for that information.',
+            [ContentTypes.TEXT]: "I'll search for that information.",
             tool_call_ids: ['search_1'],
           },
           {
@@ -1479,7 +1514,7 @@ describe('formatAgentMessages', () => {
           },
           {
             type: ContentTypes.TEXT,
-            [ContentTypes.TEXT]: 'Now, I\'ll convert the temperature.',
+            [ContentTypes.TEXT]: "Now, I'll convert the temperature.",
             tool_call_ids: ['convert_1'],
           },
           {
@@ -1493,7 +1528,7 @@ describe('formatAgentMessages', () => {
           },
           {
             type: ContentTypes.TEXT,
-            [ContentTypes.TEXT]: 'Here\'s your answer.',
+            [ContentTypes.TEXT]: "Here's your answer.",
           },
         ],
       },
@@ -1510,7 +1545,7 @@ describe('formatAgentMessages', () => {
 
     // Check first AIMessage
     expect(result.messages[0].content).toBe(
-      'I\'ll search for that information.'
+      "I'll search for that information."
     );
     expect((result.messages[0] as AIMessage).tool_calls).toHaveLength(1);
     expect((result.messages[0] as AIMessage).tool_calls?.[0]).toEqual({
@@ -1528,7 +1563,7 @@ describe('formatAgentMessages', () => {
 
     // Check second AIMessage
     expect(result.messages[2].content).toBe(
-      'Now, I\'ll convert the temperature.'
+      "Now, I'll convert the temperature."
     );
     expect((result.messages[2] as AIMessage).tool_calls).toHaveLength(1);
     expect((result.messages[2] as AIMessage).tool_calls?.[0]).toEqual({
@@ -1544,7 +1579,7 @@ describe('formatAgentMessages', () => {
 
     // Check final AIMessage
     expect(result.messages[4].content).toStrictEqual([
-      { [ContentTypes.TEXT]: 'Here\'s your answer.', type: ContentTypes.TEXT },
+      { [ContentTypes.TEXT]: "Here's your answer.", type: ContentTypes.TEXT },
     ]);
   });
 
@@ -1994,12 +2029,12 @@ describe('formatAgentMessages', () => {
         parts:
           mappingKind === 'reordered'
             ? [
-              {
-                attribution: 'tool',
-                sourceMessageId: 'second-row',
-                sourceContentPartIndices: [0],
-              },
-            ]
+                {
+                  attribution: 'tool',
+                  sourceMessageId: 'second-row',
+                  sourceContentPartIndices: [0],
+                },
+              ]
             : [{ attribution: 'tool' }],
       });
     }
@@ -2638,7 +2673,7 @@ describe('formatAgentMessages', () => {
             ? (generation.message as AIMessageChunk)
             : (streamedMessage.concat(
                 generation.message as AIMessageChunk
-            ) as AIMessageChunk);
+              ) as AIMessageChunk);
       }
       expect(streamedMessage).toBeDefined();
       const toolOutputs = streamedMessage!.additional_kwargs.tool_outputs;
@@ -2646,12 +2681,12 @@ describe('formatAgentMessages', () => {
         imageSource === 'additional_kwargs'
           ? streamedMessage!
           : new AIMessage({
-            content: 'Partial answer.',
-            response_metadata: {
-              model_provider: 'openai',
-              output: toolOutputs,
-            },
-          });
+              content: 'Partial answer.',
+              response_metadata: {
+                model_provider: 'openai',
+                output: toolOutputs,
+              },
+            });
       message.response_metadata.preempted = true;
 
       const unsafeProviderInput = convertMessagesToResponsesInput({
@@ -2879,14 +2914,14 @@ describe('formatAgentMessages', () => {
         outputVersion === 'v0'
           ? v0Message
           : new AIMessage({
-            contentBlocks: v0Message.contentBlocks,
-            additional_kwargs: v0Message.additional_kwargs,
-            response_metadata: {
-              model_provider: 'openai',
-              output_version: 'v1',
-              preempted: true,
-            },
-          });
+              contentBlocks: v0Message.contentBlocks,
+              additional_kwargs: v0Message.additional_kwargs,
+              response_metadata: {
+                model_provider: 'openai',
+                output_version: 'v1',
+                preempted: true,
+              },
+            });
       const originalSerialized = JSON.stringify(message.toJSON());
 
       const projected = projectOpenAIResponsesToolMessageContent([message]);
@@ -3227,31 +3262,31 @@ describe('formatAgentMessages', () => {
         ],
         [OPENAI_RESPONSES_REPLAY_POSITIONS_KEY]: imageFirst
           ? [
-            {
-              itemId: generatedImageId,
-              kind: 'output',
-              outputIndex: 0,
-            },
-            {
-              itemId: 'msg_after_image',
-              kind: 'text',
-              outputIndex: 1,
-              contentIndex: 0,
-            },
-          ]
+              {
+                itemId: generatedImageId,
+                kind: 'output',
+                outputIndex: 0,
+              },
+              {
+                itemId: 'msg_after_image',
+                kind: 'text',
+                outputIndex: 1,
+                contentIndex: 0,
+              },
+            ]
           : [
-            {
-              itemId: 'msg_before_image',
-              kind: 'text',
-              outputIndex: 0,
-              contentIndex: 0,
-            },
-            {
-              itemId: generatedImageId,
-              kind: 'output',
-              outputIndex: 1,
-            },
-          ],
+              {
+                itemId: 'msg_before_image',
+                kind: 'text',
+                outputIndex: 0,
+                contentIndex: 0,
+              },
+              {
+                itemId: generatedImageId,
+                kind: 'output',
+                outputIndex: 1,
+              },
+            ],
       },
       response_metadata: {
         model_provider: 'openai',
@@ -3573,14 +3608,14 @@ describe('formatAgentMessages', () => {
         outputVersion === 'v0'
           ? v0Message
           : new AIMessage({
-            contentBlocks: v0Message.contentBlocks,
-            additional_kwargs: v0Message.additional_kwargs,
-            response_metadata: {
-              model_provider: 'openai',
-              output_version: 'v1',
-              preempted: true,
-            },
-          });
+              contentBlocks: v0Message.contentBlocks,
+              additional_kwargs: v0Message.additional_kwargs,
+              response_metadata: {
+                model_provider: 'openai',
+                output_version: 'v1',
+                preempted: true,
+              },
+            });
       const originalSerialized = JSON.stringify(message.toJSON());
 
       const projected = projectOpenAIResponsesToolMessageContent([message]);
@@ -3693,14 +3728,14 @@ describe('formatAgentMessages', () => {
         outputVersion === 'v0'
           ? v0Message
           : new AIMessage({
-            contentBlocks: v0Message.contentBlocks,
-            additional_kwargs: v0Message.additional_kwargs,
-            response_metadata: {
-              model_provider: 'openai',
-              output_version: 'v1',
-              preempted: true,
-            },
-          });
+              contentBlocks: v0Message.contentBlocks,
+              additional_kwargs: v0Message.additional_kwargs,
+              response_metadata: {
+                model_provider: 'openai',
+                output_version: 'v1',
+                preempted: true,
+              },
+            });
 
       const projected = projectOpenAIResponsesToolMessageContent(
         [message],
@@ -4130,14 +4165,14 @@ describe('formatAgentMessages', () => {
         outputVersion === 'v0'
           ? v0Message
           : new AIMessage({
-            contentBlocks: v0Message.contentBlocks,
-            additional_kwargs: v0Message.additional_kwargs,
-            response_metadata: {
-              model_provider: 'openai',
-              output_version: 'v1',
-              preempted: true,
-            },
-          });
+              contentBlocks: v0Message.contentBlocks,
+              additional_kwargs: v0Message.additional_kwargs,
+              response_metadata: {
+                model_provider: 'openai',
+                output_version: 'v1',
+                preempted: true,
+              },
+            });
 
       const [projected] = projectOpenAIResponsesToolMessageContent([message]);
       const projectedMessage = projected as AIMessage;
@@ -4214,14 +4249,14 @@ describe('formatAgentMessages', () => {
         outputVersion === 'v0'
           ? v0Message
           : new AIMessage({
-            contentBlocks: v0Message.contentBlocks,
-            additional_kwargs: v0Message.additional_kwargs,
-            response_metadata: {
-              model_provider: 'openai',
-              output_version: 'v1',
-              preempted: true,
-            },
-          });
+              contentBlocks: v0Message.contentBlocks,
+              additional_kwargs: v0Message.additional_kwargs,
+              response_metadata: {
+                model_provider: 'openai',
+                output_version: 'v1',
+                preempted: true,
+              },
+            });
 
       const projected = projectOpenAIResponsesToolMessageContent([message]);
       const projectedMessage = projected[0] as AIMessage;
@@ -5261,7 +5296,7 @@ describe('formatAgentMessages', () => {
         content: [
           {
             type: ContentTypes.TEXT,
-            [ContentTypes.TEXT]: 'I\'ll search for tools first.',
+            [ContentTypes.TEXT]: "I'll search for tools first.",
             tool_call_ids: ['ts_1'],
           },
           {
@@ -5322,7 +5357,7 @@ describe('formatAgentMessages', () => {
         content: [
           {
             type: ContentTypes.TEXT,
-            [ContentTypes.TEXT]: 'I\'ll call an unknown tool.',
+            [ContentTypes.TEXT]: "I'll call an unknown tool.",
             tool_call_ids: ['uk_1'],
           },
           {
@@ -5682,7 +5717,7 @@ describe('formatAgentMessages', () => {
           },
         ],
       },
-      { role: 'user', content: 'What\'s the weather?' },
+      { role: 'user', content: "What's the weather?" },
       {
         role: 'assistant',
         content: [
@@ -5707,7 +5742,7 @@ describe('formatAgentMessages', () => {
         content: [
           {
             type: ContentTypes.TEXT,
-            [ContentTypes.TEXT]: 'Here\'s the weather information.',
+            [ContentTypes.TEXT]: "Here's the weather information.",
           },
         ],
       },
@@ -5733,13 +5768,13 @@ describe('formatAgentMessages', () => {
       { [ContentTypes.TEXT]: 'How can I help you?', type: ContentTypes.TEXT },
     ]);
     expect(result.messages[2].content).toStrictEqual([
-      { [ContentTypes.TEXT]: 'What\'s the weather?', type: ContentTypes.TEXT },
+      { [ContentTypes.TEXT]: "What's the weather?", type: ContentTypes.TEXT },
     ]);
     expect(result.messages[3].content).toBe('Let me check that for you.');
     expect(result.messages[4].content).toBe('Sunny, 75°F');
     expect(result.messages[5].content).toStrictEqual([
       {
-        [ContentTypes.TEXT]: 'Here\'s the weather information.',
+        [ContentTypes.TEXT]: "Here's the weather information.",
         type: ContentTypes.TEXT,
       },
     ]);
@@ -6333,7 +6368,7 @@ describe('formatAgentMessages', () => {
 
   it('should handle complex message transformations with indexTokenCountMap', () => {
     const payload = [
-      { role: 'user', content: 'What\'s the weather?' },
+      { role: 'user', content: "What's the weather?" },
       {
         role: 'assistant',
         content: [
@@ -6506,7 +6541,7 @@ describe('formatAgentMessages', () => {
         content: [
           {
             type: ContentTypes.TEXT,
-            [ContentTypes.TEXT]: 'I\'ll help you with that.',
+            [ContentTypes.TEXT]: "I'll help you with that.",
             tool_call_ids: ['tool_1'],
           },
           {
@@ -6556,7 +6591,7 @@ describe('formatAgentMessages', () => {
         content: [
           {
             type: ContentTypes.TEXT,
-            [ContentTypes.TEXT]: 'I\'ll perform multiple operations for you.',
+            [ContentTypes.TEXT]: "I'll perform multiple operations for you.",
             tool_call_ids: ['tool_1', 'tool_2', 'tool_3', 'tool_4', 'tool_5'],
           },
           {
@@ -6624,7 +6659,7 @@ describe('formatAgentMessages', () => {
 
     // Check AIMessage has all 5 tool calls
     expect(result.messages[0].content).toBe(
-      'I\'ll perform multiple operations for you.'
+      "I'll perform multiple operations for you."
     );
     expect((result.messages[0] as AIMessage).tool_calls).toHaveLength(5);
 
@@ -6691,7 +6726,7 @@ describe('formatAgentMessages', () => {
           {
             type: ContentTypes.THINK,
             [ContentTypes.THINK]:
-              'I\'ll add this agreement as an observation to our existing troubleshooting task in the project memory system.',
+              "I'll add this agreement as an observation to our existing troubleshooting task in the project memory system.",
           },
           {
             type: ContentTypes.TOOL_CALL,
@@ -6741,7 +6776,7 @@ describe('formatAgentMessages', () => {
     // The final AIMessage should contain the text response
     expect(typeof result.messages[2].content).toBe('string');
     expect((result.messages[2].content as string).trim()).toContain(
-      'I\'ve successfully added our agreement to the project memory system'
+      "I've successfully added our agreement to the project memory system"
     );
   });
 

@@ -1695,20 +1695,21 @@ function formatAssistantMessage(
   };
 
   /** Flush exactly one persisted assistant segment without changing its text bytes. */
-  const flushCompleteAssistantContent = (): RoleBearingMessage<AIMessage> | null => {
-    if (currentContent.length === 0 && pendingReasoningContent === '') {
-      return null;
-    }
-    const content: MessageContent = currentContent.every(
-      (part) => part.type === ContentTypes.TEXT
-    )
-      ? currentContent.map((part) => getTextContent(part)).join('')
-      : toLangChainContent(currentContent);
-    const message = appendAIMessage(content, currentContentProvenance);
-    currentContent = [];
-    currentContentProvenance = createProviderMessageProvenanceBuilder();
-    return message;
-  };
+  const flushCompleteAssistantContent =
+    (): RoleBearingMessage<AIMessage> | null => {
+      if (currentContent.length === 0 && pendingReasoningContent === '') {
+        return null;
+      }
+      const content: MessageContent = currentContent.every(
+        (part) => part.type === ContentTypes.TEXT
+      )
+        ? currentContent.map((part) => getTextContent(part)).join('')
+        : toLangChainContent(currentContent);
+      const message = appendAIMessage(content, currentContentProvenance);
+      currentContent = [];
+      currentContentProvenance = createProviderMessageProvenanceBuilder();
+      return message;
+    };
 
   const attachPendingReasoningContent = (aiMessage: AIMessage): void => {
     const reasoning = takePendingReasoningContent();
@@ -2678,18 +2679,18 @@ function scanSummaryBlocks(payload: TPayload): SummaryScan {
       boundary =
         retainedIndex != null
           ? {
-            mode: 'coverage',
-            messageIndex: retainedIndex,
-            text: summaryText,
-            tokenCount,
-          }
+              mode: 'coverage',
+              messageIndex: retainedIndex,
+              text: summaryText,
+              tokenCount,
+            }
           : {
-            mode: 'positional',
-            messageIndex: i,
-            contentIndex: j,
-            text: summaryText,
-            tokenCount,
-          };
+              mode: 'positional',
+              messageIndex: i,
+              contentIndex: j,
+              text: summaryText,
+              tokenCount,
+            };
     }
   }
 
@@ -2887,8 +2888,8 @@ export const formatAgentMessages = (
   const compactionSemanticIndexCollector =
     options?.compactionSemanticIndex != null
       ? createDerivedCompactionSemanticIndexCollector(
-        options.compactionSemanticIndex.baseSnapshot
-      )
+          options.compactionSemanticIndex.baseSnapshot
+        )
       : undefined;
   /** Emission choke point: every formatted message enters the result here, so
    *  the legacy flatten happens once per message with no closing rescan. The
@@ -2966,7 +2967,8 @@ export const formatAgentMessages = (
 
     // Q: Store the current length of messages to track where this payload message starts in the result?
     // const startIndex = messages.length;
-    if (typeof message.content === 'string') {
+    const scalarSourceContent = typeof message.content === 'string';
+    if (scalarSourceContent) {
       message = {
         ...message,
         content: [
@@ -2992,12 +2994,14 @@ export const formatAgentMessages = (
       } else if (formattedMessage.role === 'assistant') {
         attribution = 'model';
       }
-      const provenanceParts = createProviderContentProvenanceParts(
-        message.content as MessageContentComplex[],
-        sourceContentPartOffset,
-        sourceMessageId,
-        attribution
-      );
+      const provenanceParts = scalarSourceContent
+        ? undefined
+        : createProviderContentProvenanceParts(
+            message.content as MessageContentComplex[],
+            sourceContentPartOffset,
+            sourceMessageId,
+            attribution
+          );
       stampSourceMessageIdentity(
         formattedMessage,
         sourceMessageId,
@@ -3214,6 +3218,14 @@ export const formatAgentMessages = (
       flushSteerAnchor(formattedMessages[0]);
     }
     for (const formattedMessage of formattedMessages) {
+      // The array used to normalize scalar text has no corresponding stored part index.
+      if (scalarSourceContent)
+        stampSourceMessageIdentity(
+          formattedMessage,
+          sourceMessageId,
+          0,
+          'model'
+        );
       emitFormattedMessage(formattedMessage);
     }
     if (endsWithSteerMessage(formattedMessages)) {
@@ -3588,7 +3600,7 @@ function serializeFoldedValue(value: unknown): string {
   return typeof compacted === 'string'
     ? compacted
     : serializeStructuredValueBounded(compacted, MAX_FOLDED_BLOCK_CHARS)
-      .content;
+        .content;
 }
 
 interface FoldedSourceMessage {
@@ -3721,9 +3733,7 @@ function getSyntheticProviderContextProvenanceParts(
     }
     for (const attribution of source.additionalAttributions ?? []) {
       const sourceMessageId =
-        sourceMessageIds.length === 1
-          ? sourceMessageIds[0]
-          : undefined;
+        sourceMessageIds.length === 1 ? sourceMessageIds[0] : undefined;
       const retainedSourceId =
         retainedSourceIds.size === 1
           ? retainedSourceIds.values().next().value
@@ -3944,12 +3954,12 @@ function appendMessageContent(
         : { contributed: false, complete: true };
     return orderedOutput.contributed || toolCalls.contributed
       ? {
-        message: msg,
-        mappingAmbiguous: true,
-        ...(orderedOutput.hasTool && {
-          additionalAttributions: ['tool'] as const,
-        }),
-      }
+          message: msg,
+          mappingAmbiguous: true,
+          ...(orderedOutput.hasTool && {
+            additionalAttributions: ['tool'] as const,
+          }),
+        }
       : undefined;
   }
 
@@ -3964,11 +3974,11 @@ function appendMessageContent(
     const toolCalls = appendToolCalls(msg, role, textChunks, budget);
     return budget.remainingChars < remainingCharsBefore || toolCalls.contributed
       ? {
-        message: msg,
-        ...((!contentComplete || !toolCalls.complete) && {
-          mappingAmbiguous: true,
-        }),
-      }
+          message: msg,
+          ...((!contentComplete || !toolCalls.complete) && {
+            mappingAmbiguous: true,
+          }),
+        }
       : undefined;
   }
 
@@ -3976,9 +3986,9 @@ function appendMessageContent(
     const toolCalls = appendToolCalls(msg, role, textChunks, budget);
     return toolCalls.contributed
       ? {
-        message: msg,
-        ...(!toolCalls.complete && { mappingAmbiguous: true }),
-      }
+          message: msg,
+          ...(!toolCalls.complete && { mappingAmbiguous: true }),
+        }
       : undefined;
   }
 

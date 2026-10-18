@@ -121,6 +121,7 @@ import { resolveMaxSeals } from '@/llm/preempt';
 import { isBuiltRuntime } from '@/lazyRequire';
 import { initializeModel } from '@/llm/init';
 import { HandlerRegistry } from '@/events';
+import { snapshotCheckpointInput } from '@/messages/checkpointInput';
 
 /** Source-mode runs have no dist siblings for the lazy-loading seam, so every
  *  lazily loadable module is imported through the active loader before the
@@ -496,6 +497,8 @@ function getResumeUpdateMessages(
 }
 
 export class Run<_T extends t.BaseGraphState> {
+  static readonly checkpointInputInspectionVersion = 1;
+  private readonly inspectCheckpointInput?: t.RunConfig['inspectCheckpointInput'];
   id: string;
   private tokenCounter?: t.TokenCounter;
   private handlerRegistry?: HandlerRegistry;
@@ -566,6 +569,16 @@ export class Run<_T extends t.BaseGraphState> {
 
     this.id = runId;
     this.checkpointPolicy = snapshotCheckpointPolicy(config.checkpointPolicy);
+    this.inspectCheckpointInput = config.inspectCheckpointInput;
+    if (
+      this.inspectCheckpointInput != null &&
+      (typeof this.inspectCheckpointInput !== 'function' ||
+        this.checkpointPolicy == null)
+    ) {
+      throw new Error(
+        'Checkpoint input inspection requires an explicit checkpoint policy'
+      );
+    }
     const checkpointer = config.graphConfig?.compileOptions?.checkpointer;
     this.hasExplicitCheckpointer =
       checkpointer != null && typeof checkpointer === 'object';
@@ -993,6 +1006,16 @@ export class Run<_T extends t.BaseGraphState> {
   static async create<T extends t.BaseGraphState>(
     config: t.RunConfig
   ): Promise<Run<T>> {
+    const inspection = Object.getOwnPropertyDescriptor(
+      config,
+      'inspectCheckpointInput'
+    );
+    if (
+      (inspection && !('value' in inspection)) ||
+      (!inspection && 'inspectCheckpointInput' in config)
+    )
+      throw new Error('Invalid checkpoint input inspector');
+    config = { ...config, inspectCheckpointInput: inspection?.value };
     const checkpointPolicy = snapshotCheckpointPolicy(config.checkpointPolicy);
     if (checkpointPolicy != null) {
       config = {
@@ -1619,9 +1642,22 @@ export class Run<_T extends t.BaseGraphState> {
 
     const consumeStream = async (): Promise<void> => {
       let streamInputs: t.IState | Command | null = inputs;
+      if (!isResume && this.inspectCheckpointInput != null) {
+        const prepared = snapshotCheckpointInput((inputs as t.IState).messages);
+        await this.inspectCheckpointInput(
+          Object.freeze({
+            messages: prepared.inspectionMessages,
+            runId: this.id,
+            threadId: this.checkpointPolicy!.threadId,
+          })
+        );
+        if (config.signal?.aborted === true || graph.signal?.aborted === true)
+          throw new Error('Checkpoint input inspection aborted');
+        streamInputs = { ...(inputs as t.IState), messages: prepared.messages };
+      }
       if (!isResume && graph.handoffRouting != null) {
         streamInputs = {
-          ...(inputs as t.IState),
+          ...(streamInputs as t.IState),
           handoffState: graph.handoffRouting.snapshot(),
         };
       }

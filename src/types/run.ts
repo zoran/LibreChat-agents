@@ -277,6 +277,14 @@ export interface StreamLimits {
 export type RunConfig = {
   /** Host-owned recovery profile; the supplied saver owns persistence and scope authorization. */
   checkpointPolicy?: Readonly<{ threadId: string; durability: 'sync' }>;
+  /** Trusted host inspection after startup hooks, before initial durable graph input is written. */
+  inspectCheckpointInput?: (
+    input: Readonly<{
+      messages: readonly BaseMessage[];
+      runId: string;
+      threadId: string;
+    }>
+  ) => void | Promise<void>;
   runId: string;
   graphConfig: LegacyGraphConfig | StandardGraphConfig | MultiAgentGraphConfig;
   /**
