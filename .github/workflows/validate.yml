@@ -2,6 +2,12 @@ name: Validate
 
 on:
   workflow_call:
+    inputs:
+      external-provider-tests:
+        description: Run external provider tests with explicitly forwarded credentials
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -91,6 +97,12 @@ jobs:
       - name: Check circular dependencies
         run: npm run check:circular-deps
 
+      - name: Build declarations
+        run: npx tsc -p tsconfig.build.json
+
+      - name: Test light entry points
+        run: npm run test:light-entries
+
   unit-tests:
     name: 'unit tests (shard ${{ matrix.shard }}/4)'
     needs: install
@@ -117,19 +129,19 @@ jobs:
         env:
           NODE_OPTIONS: '--experimental-vm-modules'
           NODE_ENV: test
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || secrets.OPENAI_BASE_URL }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          AZURE_MODEL_NAME: ${{ secrets.AZURE_MODEL_NAME }}
-          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
-          AZURE_OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
-          AZURE_OPENAI_API_INSTANCE: ${{ secrets.AZURE_OPENAI_API_INSTANCE }}
-          AZURE_OPENAI_API_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_API_DEPLOYMENT }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-          BEDROCK_AWS_ACCESS_KEY_ID: ${{ secrets.BEDROCK_AWS_ACCESS_KEY_ID }}
-          BEDROCK_AWS_SECRET_ACCESS_KEY: ${{ secrets.BEDROCK_AWS_SECRET_ACCESS_KEY }}
+          OPENAI_API_KEY: ${{ inputs['external-provider-tests'] && (secrets.OPENAI_API_KEY) || '' }}
+          OPENAI_BASE_URL: ${{ inputs['external-provider-tests'] && (vars.OPENAI_BASE_URL || secrets.OPENAI_BASE_URL) || '' }}
+          ANTHROPIC_API_KEY: ${{ inputs['external-provider-tests'] && (secrets.ANTHROPIC_API_KEY) || '' }}
+          ANTHROPIC_BASE_URL: ${{ inputs['external-provider-tests'] && (vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL) || '' }}
+          GOOGLE_API_KEY: ${{ inputs['external-provider-tests'] && (secrets.GOOGLE_API_KEY) || '' }}
+          AZURE_MODEL_NAME: ${{ inputs['external-provider-tests'] && (secrets.AZURE_MODEL_NAME) || '' }}
+          AZURE_OPENAI_API_KEY: ${{ inputs['external-provider-tests'] && (secrets.AZURE_OPENAI_API_KEY) || '' }}
+          AZURE_OPENAI_API_VERSION: ${{ inputs['external-provider-tests'] && (secrets.AZURE_OPENAI_API_VERSION) || '' }}
+          AZURE_OPENAI_API_INSTANCE: ${{ inputs['external-provider-tests'] && (secrets.AZURE_OPENAI_API_INSTANCE) || '' }}
+          AZURE_OPENAI_API_DEPLOYMENT: ${{ inputs['external-provider-tests'] && (secrets.AZURE_OPENAI_API_DEPLOYMENT) || '' }}
+          AWS_DEFAULT_REGION: ${{ inputs['external-provider-tests'] && (secrets.AWS_DEFAULT_REGION) || '' }}
+          BEDROCK_AWS_ACCESS_KEY_ID: ${{ inputs['external-provider-tests'] && (secrets.BEDROCK_AWS_ACCESS_KEY_ID) || '' }}
+          BEDROCK_AWS_SECRET_ACCESS_KEY: ${{ inputs['external-provider-tests'] && (secrets.BEDROCK_AWS_SECRET_ACCESS_KEY) || '' }}
 
   summarization-tests:
     name: 'summarization tests (${{ matrix.group }})'
@@ -138,15 +150,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - group: anthropic
-            pattern: 'Anthropic Summarization E2E|Token accounting audit'
-          - group: openai
-            pattern: 'OpenAI Summarization E2E'
-          - group: bedrock
-            pattern: 'Bedrock Summarization E2E'
-          - group: local
-            pattern: 'no API keys'
+        include: ${{ fromJSON(inputs['external-provider-tests'] && '[{"group":"anthropic","pattern":"Anthropic Summarization E2E|Token accounting audit"},{"group":"openai","pattern":"OpenAI Summarization E2E"},{"group":"bedrock","pattern":"Bedrock Summarization E2E"},{"group":"local","pattern":"no API keys"}]' || '[{"group":"local","pattern":"no API keys"}]') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -165,19 +169,19 @@ jobs:
         env:
           NODE_OPTIONS: '--experimental-vm-modules'
           NODE_ENV: test
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || secrets.OPENAI_BASE_URL }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          AZURE_MODEL_NAME: ${{ secrets.AZURE_MODEL_NAME }}
-          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
-          AZURE_OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
-          AZURE_OPENAI_API_INSTANCE: ${{ secrets.AZURE_OPENAI_API_INSTANCE }}
-          AZURE_OPENAI_API_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_API_DEPLOYMENT }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-          BEDROCK_AWS_ACCESS_KEY_ID: ${{ secrets.BEDROCK_AWS_ACCESS_KEY_ID }}
-          BEDROCK_AWS_SECRET_ACCESS_KEY: ${{ secrets.BEDROCK_AWS_SECRET_ACCESS_KEY }}
+          OPENAI_API_KEY: ${{ inputs['external-provider-tests'] && (secrets.OPENAI_API_KEY) || '' }}
+          OPENAI_BASE_URL: ${{ inputs['external-provider-tests'] && (vars.OPENAI_BASE_URL || secrets.OPENAI_BASE_URL) || '' }}
+          ANTHROPIC_API_KEY: ${{ inputs['external-provider-tests'] && (secrets.ANTHROPIC_API_KEY) || '' }}
+          ANTHROPIC_BASE_URL: ${{ inputs['external-provider-tests'] && (vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL) || '' }}
+          GOOGLE_API_KEY: ${{ inputs['external-provider-tests'] && (secrets.GOOGLE_API_KEY) || '' }}
+          AZURE_MODEL_NAME: ${{ inputs['external-provider-tests'] && (secrets.AZURE_MODEL_NAME) || '' }}
+          AZURE_OPENAI_API_KEY: ${{ inputs['external-provider-tests'] && (secrets.AZURE_OPENAI_API_KEY) || '' }}
+          AZURE_OPENAI_API_VERSION: ${{ inputs['external-provider-tests'] && (secrets.AZURE_OPENAI_API_VERSION) || '' }}
+          AZURE_OPENAI_API_INSTANCE: ${{ inputs['external-provider-tests'] && (secrets.AZURE_OPENAI_API_INSTANCE) || '' }}
+          AZURE_OPENAI_API_DEPLOYMENT: ${{ inputs['external-provider-tests'] && (secrets.AZURE_OPENAI_API_DEPLOYMENT) || '' }}
+          AWS_DEFAULT_REGION: ${{ inputs['external-provider-tests'] && (secrets.AWS_DEFAULT_REGION) || '' }}
+          BEDROCK_AWS_ACCESS_KEY_ID: ${{ inputs['external-provider-tests'] && (secrets.BEDROCK_AWS_ACCESS_KEY_ID) || '' }}
+          BEDROCK_AWS_SECRET_ACCESS_KEY: ${{ inputs['external-provider-tests'] && (secrets.BEDROCK_AWS_SECRET_ACCESS_KEY) || '' }}
 
   integration-tests:
     name: 'integration tests (change-gated)'
@@ -197,6 +201,12 @@ jobs:
         with:
           path: node_modules
           key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Report external provider tests not run
+        if: inputs['external-provider-tests'] == false
+        run: |
+          echo "### External provider tests: NOT RUN" >> "$GITHUB_STEP_SUMMARY"
+          echo "external-provider-tests=false; local deterministic checks remain required. This is not a live-provider PASS." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Resolve diff range
         run: |
@@ -225,20 +235,20 @@ jobs:
 
       - name: Run Google LLM tests (flaky - timeouts allowed)
         id: google_llm_tests
-        if: steps.google_changes.outputs.changed == 'true'
+        if: inputs['external-provider-tests'] && steps.google_changes.outputs.changed == 'true'
         continue-on-error: true
         timeout-minutes: 6
         run: npx jest src/llm/google/llm.spec.ts --runInBand
         env:
           NODE_OPTIONS: '--experimental-vm-modules'
           NODE_ENV: test
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GOOGLE_API_KEY: ${{ inputs['external-provider-tests'] && (secrets.GOOGLE_API_KEY) || '' }}
           GOOGLE_TEST_CALL_GAP_MS: '1000'
           GOOGLE_TEST_MAX_RETRIES: '2'
           GOOGLE_TEST_MAX_RETRY_DELAY_MS: '50000'
 
       - name: Surface Google LLM soft failure
-        if: always() && steps.google_changes.outputs.changed == 'true' && steps.google_llm_tests.outcome == 'failure'
+        if: always() && inputs['external-provider-tests'] && steps.google_changes.outputs.changed == 'true' && steps.google_llm_tests.outcome == 'failure'
         run: |
           echo "::warning title=Soft-failed Google LLM tests::The Google LLM integration suite failed, but this workflow allows provider API failures. Inspect the test job logs before merging."
           {
@@ -262,18 +272,18 @@ jobs:
 
       - name: Run Anthropic LLM tests (flaky - timeouts allowed)
         id: anthropic_llm_tests
-        if: steps.anthropic_changes.outputs.changed == 'true'
+        if: inputs['external-provider-tests'] && steps.anthropic_changes.outputs.changed == 'true'
         continue-on-error: true
         timeout-minutes: 6
         run: npx jest src/llm/anthropic/llm.spec.ts
         env:
           NODE_OPTIONS: '--experimental-vm-modules'
           NODE_ENV: test
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+          ANTHROPIC_API_KEY: ${{ inputs['external-provider-tests'] && (secrets.ANTHROPIC_API_KEY) || '' }}
+          ANTHROPIC_BASE_URL: ${{ inputs['external-provider-tests'] && (vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL) || '' }}
 
       - name: Surface Anthropic LLM soft failure
-        if: always() && steps.anthropic_changes.outputs.changed == 'true' && steps.anthropic_llm_tests.outcome == 'failure'
+        if: always() && inputs['external-provider-tests'] && steps.anthropic_changes.outputs.changed == 'true' && steps.anthropic_llm_tests.outcome == 'failure'
         run: |
           echo "::warning title=Soft-failed Anthropic LLM tests::The Anthropic LLM integration suite failed, but this workflow allows provider API failures. Inspect the test job logs before merging."
           {
@@ -301,7 +311,7 @@ jobs:
         env:
           NODE_OPTIONS: '--experimental-vm-modules'
           NODE_ENV: test
-          LIBRECHAT_CODE_BASEURL: ${{ secrets.LIBRECHAT_CODE_BASEURL }}
+          LIBRECHAT_CODE_BASEURL: ${{ inputs['external-provider-tests'] && (secrets.LIBRECHAT_CODE_BASEURL) || '' }}
 
       - name: Check for Tool Search changes
         id: tool_search_changes
@@ -319,7 +329,7 @@ jobs:
         env:
           NODE_OPTIONS: '--experimental-vm-modules'
           NODE_ENV: test
-          LIBRECHAT_CODE_BASEURL: ${{ secrets.LIBRECHAT_CODE_BASEURL }}
+          LIBRECHAT_CODE_BASEURL: ${{ inputs['external-provider-tests'] && (secrets.LIBRECHAT_CODE_BASEURL) || '' }}
 
       - name: Check for durability changes
         id: durability_changes

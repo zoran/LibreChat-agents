@@ -695,6 +695,29 @@ function resolveAttemptRequest(
   });
 }
 
+const EMPTY_PROVIDER_RESPONSE_MESSAGE =
+  'The model provider returned an empty response.';
+
+/**
+ * Tool calls across an attempt's messages. A missing message means the provider produced
+ * nothing, which is reported as such rather than surfacing as a `TypeError` from reading
+ * `tool_calls` off `undefined`.
+ */
+export function collectAttemptToolCalls(
+  messages: ReadonlyArray<BaseMessage | null | undefined> | undefined
+): ToolCall[] {
+  const calls: ToolCall[] = [];
+  for (const message of messages ?? []) {
+    if (message == null) {
+      throw new Error(EMPTY_PROVIDER_RESPONSE_MESSAGE);
+    }
+    if ('tool_calls' in message) {
+      calls.push(...((message.tool_calls as ToolCall[] | undefined) ?? []));
+    }
+  }
+  return calls;
+}
+
 /**
  * One model attempt. Stamps the attempt identity into callback metadata
  * (see the generation-key notes in `streamLimits.ts`), leases the attempt's
@@ -725,7 +748,11 @@ export async function attemptInvoke(
       ? preparedRequest
       : {
         ...preparedRequest,
-        model: withProviderTextBoundary(preparedRequest.model, policy, provider),
+        model: withProviderTextBoundary(
+          preparedRequest.model,
+          policy,
+          provider
+        ),
       };
   const configuredModel =
     providerStampedConfig.metadata?.[Constants.INVOKED_MODEL];
@@ -786,22 +813,24 @@ export async function attemptInvoke(
       },
       stampedConfig
     );
-    const calls =
-      result.messages?.flatMap((message) =>
-        'tool_calls' in message
-          ? ((message.tool_calls as ToolCall[] | undefined) ?? [])
-          : []
-      ) ?? [];
+    const calls = collectAttemptToolCalls(result.messages);
     prepared?.finish(preparedAttempt, calls);
     return result;
   } catch (error) {
     if (policy != null && config?.signal?.aborted === true) {
       const reason: unknown = config.signal.reason;
-      if (reason instanceof StreamLimitExceededError || reason instanceof PreparedSubagentError) {
+      if (
+        reason instanceof StreamLimitExceededError ||
+        reason instanceof PreparedSubagentError
+      ) {
         prepared?.finish(preparedAttempt, undefined, reason);
         throw reason;
       }
-      const cancelled = new ProviderTextProtectionError(reason instanceof ProviderTextProtectionError ? reason.code : 'cancelled');
+      const cancelled = new ProviderTextProtectionError(
+        reason instanceof ProviderTextProtectionError
+          ? reason.code
+          : 'cancelled'
+      );
       prepared?.finish(preparedAttempt, undefined, cancelled);
       throw cancelled;
     }
@@ -1099,7 +1128,11 @@ async function attemptInvokeBody(
         notePreemptRestartedRun(sealedRunId, finalChunk);
       }
       restartRoute = 'aborted';
-      restartController.abort(providerTextProtection == null ? undefined : createProviderTextRestartCancellation());
+      restartController.abort(
+        providerTextProtection == null
+          ? undefined
+          : createProviderTextRestartCancellation()
+      );
       return true;
     };
     const unsubscribeWake =
@@ -1366,7 +1399,8 @@ async function attemptInvokeBody(
         restartRoute === 'aborted' &&
         !(error instanceof StreamLimitExceededError) &&
         !(error instanceof PreparedSubagentError) &&
-        (!(error instanceof ProviderTextProtectionError) || isProviderTextRestartCancellation(error)) &&
+        (!(error instanceof ProviderTextProtectionError) ||
+          isProviderTextRestartCancellation(error)) &&
         config.signal?.aborted !== true;
       if (!ownAbort) {
         throw error;
@@ -1500,7 +1534,7 @@ async function attemptInvokeBody(
     }
 
     if (finalChunk == null) {
-      throw new Error('The model provider returned an empty response.');
+      throw new Error(EMPTY_PROVIDER_RESPONSE_MESSAGE);
     }
 
     detachValidatedModelToolCalls(finalChunk);
