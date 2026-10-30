@@ -14,11 +14,6 @@ import type {
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { ToolCall } from '@langchain/core/messages/tool';
 import type {
-  OrderedToolHistoryProjection,
-  ToolHistoryPreparation,
-  ToolHistoryCallMirrors,
-} from './toolHistoryProjection';
-import type {
   BedrockReasoningContentText,
   ExtendedMessageContent,
   GoogleReasoningContentText,
@@ -37,6 +32,11 @@ import type {
   CompactionSemanticIndexEntry,
   CompactionSemanticIndexSnapshot,
 } from '@/types';
+import type {
+  OrderedToolHistoryProjection,
+  ToolHistoryPreparation,
+  ToolHistoryCallMirrors,
+} from './toolHistoryProjection';
 import type {
   ProviderMessageAttribution,
   ProviderMessageProvenancePart,
@@ -71,6 +71,11 @@ import {
   serializeStructuredValueBounded,
 } from '@/utils/toolContent';
 import {
+  createToolHistoryPreparation,
+  isToolHistoryCallMirror,
+  recordToolHistoryCallMirror,
+} from './toolHistoryProjection';
+import {
   Providers,
   ContentTypes,
   Constants,
@@ -78,15 +83,10 @@ import {
 } from '@/common';
 import { normalizeAnthropicToolCallId } from '@/llm/anthropic/utils/message_inputs';
 import { toLangChainContent, toLangChainMessageFields } from './langchain';
-import { isReasoningContentBlock } from './reasoningTypes';
 import { flattenLegacyContent, isLegacyConvertible } from './content';
 import { HARD_MAX_TOOL_RESULT_CHARS } from '@/utils/truncation';
+import { isReasoningContentBlock } from './reasoningTypes';
 import { emitAgentLog } from '@/utils/events';
-import {
-  createToolHistoryPreparation,
-  isToolHistoryCallMirror,
-  recordToolHistoryCallMirror,
-} from './toolHistoryProjection';
 
 interface MediaMessageParams {
   message: {
@@ -2679,18 +2679,18 @@ function scanSummaryBlocks(payload: TPayload): SummaryScan {
       boundary =
         retainedIndex != null
           ? {
-              mode: 'coverage',
-              messageIndex: retainedIndex,
-              text: summaryText,
-              tokenCount,
-            }
+            mode: 'coverage',
+            messageIndex: retainedIndex,
+            text: summaryText,
+            tokenCount,
+          }
           : {
-              mode: 'positional',
-              messageIndex: i,
-              contentIndex: j,
-              text: summaryText,
-              tokenCount,
-            };
+            mode: 'positional',
+            messageIndex: i,
+            contentIndex: j,
+            text: summaryText,
+            tokenCount,
+          };
     }
   }
 
@@ -2888,8 +2888,8 @@ export const formatAgentMessages = (
   const compactionSemanticIndexCollector =
     options?.compactionSemanticIndex != null
       ? createDerivedCompactionSemanticIndexCollector(
-          options.compactionSemanticIndex.baseSnapshot
-        )
+        options.compactionSemanticIndex.baseSnapshot
+      )
       : undefined;
   /** Emission choke point: every formatted message enters the result here, so
    *  the legacy flatten happens once per message with no closing rescan. The
@@ -3001,7 +3001,7 @@ export const formatAgentMessages = (
             sourceContentPartOffset,
             sourceMessageId,
             attribution
-          );
+        );
       stampSourceMessageIdentity(
         formattedMessage,
         sourceMessageId,
@@ -3600,7 +3600,7 @@ function serializeFoldedValue(value: unknown): string {
   return typeof compacted === 'string'
     ? compacted
     : serializeStructuredValueBounded(compacted, MAX_FOLDED_BLOCK_CHARS)
-        .content;
+      .content;
 }
 
 interface FoldedSourceMessage {
@@ -3954,12 +3954,12 @@ function appendMessageContent(
         : { contributed: false, complete: true };
     return orderedOutput.contributed || toolCalls.contributed
       ? {
-          message: msg,
-          mappingAmbiguous: true,
-          ...(orderedOutput.hasTool && {
-            additionalAttributions: ['tool'] as const,
-          }),
-        }
+        message: msg,
+        mappingAmbiguous: true,
+        ...(orderedOutput.hasTool && {
+          additionalAttributions: ['tool'] as const,
+        }),
+      }
       : undefined;
   }
 
@@ -3974,11 +3974,11 @@ function appendMessageContent(
     const toolCalls = appendToolCalls(msg, role, textChunks, budget);
     return budget.remainingChars < remainingCharsBefore || toolCalls.contributed
       ? {
-          message: msg,
-          ...((!contentComplete || !toolCalls.complete) && {
-            mappingAmbiguous: true,
-          }),
-        }
+        message: msg,
+        ...((!contentComplete || !toolCalls.complete) && {
+          mappingAmbiguous: true,
+        }),
+      }
       : undefined;
   }
 
@@ -3986,9 +3986,9 @@ function appendMessageContent(
     const toolCalls = appendToolCalls(msg, role, textChunks, budget);
     return toolCalls.contributed
       ? {
-          message: msg,
-          ...(!toolCalls.complete && { mappingAmbiguous: true }),
-        }
+        message: msg,
+        ...(!toolCalls.complete && { mappingAmbiguous: true }),
+      }
       : undefined;
   }
 

@@ -34,11 +34,13 @@ async function deriveRunTokenCounter(
     },
     indexTokenCountMap: { 0: 10 },
   };
-  await Run.create<t.IState>(config);
-  if (config.tokenCounter == null) {
+  const run = await Run.create<t.IState>(config);
+  const counter = run['tokenCounter'];
+  expect(config).not.toHaveProperty('tokenCounter');
+  if (counter == null) {
     throw new Error('Run.create did not derive a token counter');
   }
-  return config.tokenCounter;
+  return counter;
 }
 
 describe('Run.create token counter derivation', () => {
